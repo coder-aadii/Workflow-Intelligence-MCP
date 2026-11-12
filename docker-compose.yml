@@ -1,0 +1,93 @@
+# ---------------------------------------------------------------
+# docker-compose.yml — Workflow Intelligence MCP (v1.0.0)
+#
+# Multi-container stack:
+#   - workflow-intelligence-mcp : core MCP server (SSE on port 8000)
+#   - postgres                  : PostgreSQL 16 persistence
+#   - redis                     : Redis 7 alpine cache
+#
+# Named volumes provide data persistence across container restarts.
+# `depends_on: condition: service_healthy` enforces startup ordering.
+#
+# Run:
+#   docker compose up -d
+#
+# The MCP server is reachable at http://localhost:8000 (SSE transport).
+# ---------------------------------------------------------------
+
+services:
+  workflow-intelligence-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: workflow-intelligence-mcp:latest
+    container_name: workflow-intelligence-mcp
+    ports:
+      - "8000:8000"
+    environment:
+      - WORKFLOW_ENV=production
+      - SERVER_TRANSPORT=sse
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8000
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/workflow_intelligence
+      - DUCKDB_PATH=/app/data/procurement_costs.duckdb
+      - REDIS_URL=redis://redis:6379/0
+      - LOG_LEVEL=INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - wimcp-sample-data:/app/sample-data:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import workflow_intelligence.server; print('healthy')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    networks:
+      - wimcp-network
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: wimcp-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=workflow_intelligence
+    volumes:
+      - wimcp-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d workflow_intelligence"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    networks:
+      - wimcp-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: wimcp-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - wimcp-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      start_period: 5s
+      retries: 5
+    networks:
+      - wimcp-network
+
+volumes:
+  wimcp-postgres-data:
+  wimcp-redis-data:
+  wimcp-sample-data:
+
+networks:
+  wimcp-network:
+    driver: bridge
