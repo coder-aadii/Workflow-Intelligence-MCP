@@ -22,6 +22,7 @@ from workflow_intelligence.schemas import (
     EscalationRequest,
     EscalationResult,
     ExceptionCategory,
+    ExceptionInvestigationResult,
     ExecutionStatus,
     KPICalculationRequest,
     KPIExplanationRequest,
@@ -299,12 +300,12 @@ class TestExceptionSchemas:
     """Tests for workflow exception and triage data models."""
 
     def test_exception_category_enum(self) -> None:
-        """ExceptionCategory should expose all required categories."""
-        assert ExceptionCategory.SCHEMA_DRIFT == "SCHEMA_DRIFT"
-        assert ExceptionCategory.DATA_MISMATCH == "DATA_MISMATCH"
-        assert ExceptionCategory.APPROVAL_TIMEOUT == "APPROVAL_TIMEOUT"
-        assert ExceptionCategory.API_TIMEOUT == "API_TIMEOUT"
-        assert ExceptionCategory.POLICY_VIOLATION == "POLICY_VIOLATION"
+        """ExceptionCategory should expose all Phase 3 triage categories."""
+        assert ExceptionCategory.MASTER_DATA_DISCREPANCY == "MASTER_DATA_DISCREPANCY"
+        assert ExceptionCategory.GOVERNANCE_INCOMPLETE == "GOVERNANCE_INCOMPLETE"
+        assert ExceptionCategory.CONCURRENCY_CONFLICT == "CONCURRENCY_CONFLICT"
+        assert ExceptionCategory.TRANSIENT_NETWORK_DROP == "TRANSIENT_NETWORK_DROP"
+        assert ExceptionCategory.FINANCIAL_POLICY_BREACH == "FINANCIAL_POLICY_BREACH"
 
     def test_workflow_investigation_request(self) -> None:
         """WorkflowInvestigationRequest requires case_id, type, failure payload."""
@@ -403,6 +404,57 @@ class TestExceptionSchemas:
         assert result.routed_department == "Finance"
         assert result.priority == SeverityLevel.HIGH
         assert result.success is True
+
+
+class TestExceptionInvestigationResult:
+    """Tests for ExceptionInvestigationResult schema."""
+
+    def test_exception_investigation_result_inherits_base(self) -> None:
+        """ExceptionInvestigationResult should inherit BaseMCPResponse fields."""
+        result = ExceptionInvestigationResult(
+            case_id="PO-10042",
+            exception_id="EXC-001",
+            category=ExceptionCategory.MASTER_DATA_DISCREPANCY,
+            matched_entities=[
+                MatchedEntity(
+                    entity_id="VEND-00412",
+                    registered_name="ABC Logistics Global Inc",
+                    matching_score=98.0,
+                    discrepancies=["vendor_name_typo"],
+                )
+            ],
+            classification_reason=(
+                "Vendor name mismatch with exact tax ID match; "
+                "classified as master data discrepancy."
+            ),
+            severity=SeverityLevel.MEDIUM,
+            auto_resolvable=True,
+            recommended_remediation="Remap vendor ID and retry dispatch.",
+            audit_narrative=(
+                "Investigated case PO-10042; vendor name typo detected "
+                "with tax ID exact match."
+            ),
+        )
+        assert result.case_id == "PO-10042"
+        assert result.exception_id == "EXC-001"
+        assert result.category == ExceptionCategory.MASTER_DATA_DISCREPANCY
+        assert len(result.matched_entities) == 1
+        assert result.matched_entities[0].matching_score == 98.0
+        assert result.severity == SeverityLevel.MEDIUM
+        assert result.auto_resolvable is True
+        assert result.success is True
+
+    def test_exception_investigation_result_auto_resolve_false(self) -> None:
+        """ExceptionInvestigationResult should default auto_resolvable to False."""
+        result = ExceptionInvestigationResult(
+            case_id="PO-10043",
+            exception_id="EXC-002",
+            category=ExceptionCategory.FINANCIAL_POLICY_BREACH,
+            classification_reason="Line item total exceeds budget.",
+            recommended_remediation="Escalate to Finance Manager.",
+            audit_narrative="Budget breach detected; no automated fix available.",
+        )
+        assert result.auto_resolvable is False
 
 
 class TestDecisionSchemas:

@@ -11,13 +11,58 @@ from .common import BaseMCPResponse, SeverityLevel
 
 
 class ExceptionCategory(StrEnum):
-    """Categories of workflow exceptions."""
+    """Categories of workflow exceptions per Phase 3 triage taxonomy."""
 
-    SCHEMA_DRIFT = "SCHEMA_DRIFT"
-    DATA_MISMATCH = "DATA_MISMATCH"
-    APPROVAL_TIMEOUT = "APPROVAL_TIMEOUT"
-    API_TIMEOUT = "API_TIMEOUT"
-    POLICY_VIOLATION = "POLICY_VIOLATION"
+    MASTER_DATA_DISCREPANCY = "MASTER_DATA_DISCREPANCY"
+    GOVERNANCE_INCOMPLETE = "GOVERNANCE_INCOMPLETE"
+    CONCURRENCY_CONFLICT = "CONCURRENCY_CONFLICT"
+    TRANSIENT_NETWORK_DROP = "TRANSIENT_NETWORK_DROP"
+    FINANCIAL_POLICY_BREACH = "FINANCIAL_POLICY_BREACH"
+
+
+class ExceptionInvestigationResult(BaseMCPResponse):
+    """Result of investigating a failed workflow case.
+
+    Attributes:
+        case_id: Unique case identifier.
+        exception_id: Unique exception identifier assigned during investigation.
+        category: Classified exception category.
+        matched_entities: Entities matched against master data during investigation.
+        classification_reason: Human-readable explanation of the classification.
+        severity: Priority level of the exception.
+        auto_resolvable: Whether the exception can be automatically resolved.
+        recommended_remediation: Suggested remediation action.
+        audit_narrative: Structured audit narrative of the investigation.
+    """
+
+    case_id: str = Field(..., description="Unique case identifier.")
+    exception_id: str = Field(
+        ..., description="Unique exception identifier assigned during investigation."
+    )
+    category: ExceptionCategory = Field(
+        ..., description="Classified exception category."
+    )
+    matched_entities: list[MatchedEntity] = Field(
+        default_factory=list,
+        description="Entities matched against master data during investigation.",
+    )
+    classification_reason: str = Field(
+        ..., description="Human-readable explanation of the classification."
+    )
+    severity: SeverityLevel = Field(
+        default=SeverityLevel.MEDIUM,
+        description="Priority level of the exception.",
+    )
+    auto_resolvable: bool = Field(
+        default=False,
+        description="Whether the exception can be automatically resolved.",
+    )
+    recommended_remediation: str = Field(
+        ..., description="Suggested remediation action."
+    )
+    audit_narrative: str = Field(
+        ..., description="Structured audit narrative of the investigation."
+    )
 
 
 class WorkflowInvestigationRequest(BaseModel):

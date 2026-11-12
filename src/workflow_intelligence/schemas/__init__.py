@@ -20,6 +20,7 @@ from workflow_intelligence.schemas.exception import (  # noqa: F401
     EscalationRequest,
     EscalationResult,
     ExceptionCategory,
+    ExceptionInvestigationResult,
     MatchedEntity,
     ResolutionPlan,
     ResolutionRequest,
@@ -56,6 +57,7 @@ __all__ = [
     "AutomationScoreReport",
     # exception
     "ExceptionCategory",
+    "ExceptionInvestigationResult",
     "WorkflowInvestigationRequest",
     "ResolutionRequest",
     "EscalationRequest",
