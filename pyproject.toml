@@ -72,5 +72,5 @@ files = ["src", "tests"]
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
-module = ["pm4py", "pm4py.*", "duckdb", "duckdb.*"]
+module = ["pm4py", "pm4py.*", "duckdb", "duckdb.*", "pyarrow", "fastparquet"]
 ignore_missing_imports = true

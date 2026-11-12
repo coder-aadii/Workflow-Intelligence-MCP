@@ -13,6 +13,7 @@ from workflow_intelligence.schemas import (
     AutomationScoreReport,
     AutomationScoreRequest,
     BaseMCPResponse,
+    BottleneckItem,
     BottleneckReport,
     BottleneckRequest,
     DecisionBrief,
@@ -33,7 +34,7 @@ from workflow_intelligence.schemas import (
     ResolutionPlan,
     ResolutionRequest,
     SeverityLevel,
-    TransitionMetric,
+    StageMetric,
     WorkflowInvestigationRequest,
 )
 
@@ -143,22 +144,24 @@ class TestProcessSchemas:
         with pytest.raises(ValidationError):
             AutomationScoreRequest(source_uri="events.csv", min_frequency=0)
 
-    def test_transition_metric(self) -> None:
-        """TransitionMetric should capture source, target, counts, and durations."""
-        tm = TransitionMetric(
+    def test_stage_metric(self) -> None:
+        """StageMetric should capture transition data with bottleneck flag."""
+        sm = StageMetric(
             source_activity="Purchase Request",
             target_activity="Manager Approval",
             transition_count=5,
-            mean_duration_hours=24.0,
             median_duration_hours=20.0,
-            std_dev_duration_hours=5.0,
+            mean_duration_hours=24.0,
+            std_dev_hours=5.0,
+            is_bottleneck=True,
         )
-        assert tm.source_activity == "Purchase Request"
-        assert tm.target_activity == "Manager Approval"
-        assert tm.transition_count == 5
-        assert tm.mean_duration_hours == 24.0
-        assert tm.median_duration_hours == 20.0
-        assert tm.std_dev_duration_hours == 5.0
+        assert sm.source_activity == "Purchase Request"
+        assert sm.target_activity == "Manager Approval"
+        assert sm.transition_count == 5
+        assert sm.median_duration_hours == 20.0
+        assert sm.mean_duration_hours == 24.0
+        assert sm.std_dev_hours == 5.0
+        assert sm.is_bottleneck is True
 
     def test_process_analysis_result_inherits_base(self) -> None:
         """ProcessAnalysisResult should inherit BaseMCPResponse fields."""
@@ -166,73 +169,130 @@ class TestProcessSchemas:
             total_cases=100,
             total_events=500,
             unique_activities=["A", "B"],
+            variant_count=3,
+            top_variants=[{"A->B->C": 40}, {"A->D->C": 30}],
+            average_case_duration_hours=48.0,
             transitions=[
-                TransitionMetric(
+                StageMetric(
                     source_activity="A",
                     target_activity="B",
                     transition_count=10,
+                    is_bottleneck=True,
                 )
             ],
         )
         assert result.total_cases == 100
         assert result.total_events == 500
         assert result.unique_activities == ["A", "B"]
+        assert result.variant_count == 3
+        assert result.top_variants == [{"A->B->C": 40}, {"A->D->C": 30}]
+        assert result.average_case_duration_hours == 48.0
         assert len(result.transitions) == 1
+        assert result.transitions[0].is_bottleneck is True
         assert result.success is True
         assert isinstance(result.execution_id, str)
 
-    def test_bottleneck_report(self) -> None:
-        """BottleneckReport should contain filtered stages and threshold."""
+    def test_bottleneck_item(self) -> None:
+        """BottleneckItem should capture bottleneck transition details."""
+        item = BottleneckItem(
+            stage_transition="Finance Approval -> Vendor Selection",
+            avg_duration_hours=74.2,
+            baseline_duration_hours=12.0,
+            z_score=3.8,
+            affected_case_count=312,
+            primary_contributor="Pending manual budget verification",
+            recommendation="Introduce automated budget pre-checks.",
+        )
+        assert item.stage_transition == "Finance Approval -> Vendor Selection"
+        assert item.avg_duration_hours == 74.2
+        assert item.baseline_duration_hours == 12.0
+        assert item.z_score == 3.8
+        assert item.affected_case_count == 312
+        assert item.primary_contributor == "Pending manual budget verification"
+        assert item.recommendation == "Introduce automated budget pre-checks."
+
+    def test_bottleneck_report_inherits_base(self) -> None:
+        """BottleneckReport should inherit BaseMCPResponse fields."""
         report = BottleneckReport(
-            stages=[
-                TransitionMetric(
-                    source_activity="Finance Approval",
-                    target_activity="Vendor Selection",
-                    transition_count=3,
-                    mean_duration_hours=74.2,
+            source_uri="sample-data/procurement_events.csv",
+            total_stages_analyzed=10,
+            bottlenecks=[
+                BottleneckItem(
+                    stage_transition="A -> B",
+                    avg_duration_hours=74.2,
+                    baseline_duration_hours=12.0,
+                    z_score=3.8,
+                    affected_case_count=312,
+                    recommendation="Automate budget pre-checks.",
                 )
             ],
-            threshold_std_dev=2.0,
         )
-        assert len(report.stages) == 1
-        assert report.threshold_std_dev == 2.0
+        assert report.source_uri == "sample-data/procurement_events.csv"
+        assert report.total_stages_analyzed == 10
+        assert len(report.bottlenecks) == 1
+        assert report.success is True
 
-    def test_automation_score_report(self) -> None:
-        """AutomationScoreReport should rank candidates with automation scores."""
+    def test_automation_candidate(self) -> None:
+        """AutomationCandidate should capture scoring data."""
+        candidate = AutomationCandidate(
+            activity_name="Requisition Approval",
+            execution_frequency=25,
+            avg_duration_minutes=2880.0,
+            standard_deviation_minutes=600.0,
+            manual_effort_score=85.0,
+            automation_potential_score=90.0,
+            rank=1,
+        )
+        assert candidate.activity_name == "Requisition Approval"
+        assert candidate.execution_frequency == 25
+        assert candidate.avg_duration_minutes == 2880.0
+        assert candidate.standard_deviation_minutes == 600.0
+        assert candidate.manual_effort_score == 85.0
+        assert candidate.automation_potential_score == 90.0
+        assert candidate.rank == 1
+
+    def test_automation_candidate_rejects_score_out_of_range(self) -> None:
+        """AutomationCandidate should reject scores outside 0-100."""
+        with pytest.raises(ValidationError):
+            AutomationCandidate(
+                activity_name="X",
+                execution_frequency=1,
+                avg_duration_minutes=60.0,
+                standard_deviation_minutes=10.0,
+                manual_effort_score=101.0,
+                automation_potential_score=50.0,
+                rank=1,
+            )
+        with pytest.raises(ValidationError):
+            AutomationCandidate(
+                activity_name="X",
+                execution_frequency=1,
+                avg_duration_minutes=60.0,
+                standard_deviation_minutes=10.0,
+                manual_effort_score=50.0,
+                automation_potential_score=-1.0,
+                rank=1,
+            )
+
+    def test_automation_score_report_inherits_base(self) -> None:
+        """AutomationScoreReport should inherit BaseMCPResponse fields."""
         report = AutomationScoreReport(
             candidates=[
                 AutomationCandidate(
-                    activity="Requisition Approval",
-                    frequency=25,
-                    avg_duration_hours=48.0,
-                    variance_hours=10.0,
-                    automation_score=85.5,
+                    activity_name="Requisition Approval",
+                    execution_frequency=25,
+                    avg_duration_minutes=2880.0,
+                    standard_deviation_minutes=600.0,
+                    manual_effort_score=85.0,
+                    automation_potential_score=90.0,
+                    rank=1,
                 )
             ],
-            min_frequency=10,
+            methodology="Score = f(frequency, duration, 1/variance)",
         )
         assert len(report.candidates) == 1
-        assert report.candidates[0].automation_score == 85.5
-        assert report.min_frequency == 10
-
-    def test_automation_candidate_rejects_score_out_of_range(self) -> None:
-        """AutomationCandidate should reject automation_score outside 0-100."""
-        with pytest.raises(ValidationError):
-            AutomationCandidate(
-                activity="X",
-                frequency=1,
-                avg_duration_hours=1.0,
-                variance_hours=0.0,
-                automation_score=101.0,
-            )
-        with pytest.raises(ValidationError):
-            AutomationCandidate(
-                activity="X",
-                frequency=1,
-                avg_duration_hours=1.0,
-                variance_hours=0.0,
-                automation_score=-1.0,
-            )
+        assert report.methodology == "Score = f(frequency, duration, 1/variance)"
+        assert report.success is True
 
 
 class TestExceptionSchemas:

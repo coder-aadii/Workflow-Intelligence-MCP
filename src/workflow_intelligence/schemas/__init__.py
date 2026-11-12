@@ -29,11 +29,12 @@ from workflow_intelligence.schemas.process import (  # noqa: F401
     AutomationCandidate,
     AutomationScoreReport,
     AutomationScoreRequest,
+    BottleneckItem,
     BottleneckReport,
     BottleneckRequest,
     ProcessAnalysisResult,
     ProcessAnalyzeRequest,
-    TransitionMetric,
+    StageMetric,
 )
 
 __all__ = [
@@ -47,8 +48,9 @@ __all__ = [
     "ProcessAnalyzeRequest",
     "BottleneckRequest",
     "AutomationScoreRequest",
-    "TransitionMetric",
+    "StageMetric",
     "ProcessAnalysisResult",
+    "BottleneckItem",
     "BottleneckReport",
     "AutomationCandidate",
     "AutomationScoreReport",
