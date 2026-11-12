@@ -199,9 +199,9 @@ Executes high-performance analytical queries using embedded DuckDB to evaluate b
 
 | Tool Name | Parameters | Output Schema | Purpose |
 |---|---|---|---|
-| `decision_analyze_kpi_performance` | `metric_name` (str)<br>`timeframe_current` (str)<br>`timeframe_baseline` (str) | `PerformanceAnalysisResult` | Evaluates deterministic KPI variance across periods. |
-| `decision_explain_kpi_deviation` | `metric_name` (str)<br>`observed_delta` (float)<br>`dimension` (str, optional) | `DeviationExplanation` | Segments operational logs to determine which categories or entities drove the variance. |
-| `decision_generate_brief` | `topic` (str)<br>`metric_ids` (list[str]) | `DecisionBrief` | Synthesizes verified numbers, root causes, and recommended actions into an executive-ready brief. |
+| `decision_analyze_kpi_performance` | `metric_name` (str)<br>`source_uri` (str)<br>`timeframe_current` (str)<br>`timeframe_baseline` (str)<br>`timeframe_column` (str, default "timeframe")<br>`custom_expression` (str, optional) | `PerformanceAnalysisResult` | Evaluates deterministic KPI variance across periods over any CSV/Parquet dataset with zero hardcoding. |
+| `decision_explain_kpi_deviation` | `metric_name` (str)<br>`source_uri` (str)<br>`timeframe_current` (str)<br>`timeframe_baseline` (str)<br>`observed_delta` (float)<br>`timeframe_column` (str, default "timeframe")<br>`dimension` (str, optional)<br>`custom_expression` (str, optional) | `DeviationExplanation` | Explains variance drivers with dynamic dimension inference and statistical significance indicators. |
+| `decision_generate_brief` | `topic` (str)<br>`metric_ids` (list[str]) | `DecisionBrief` | Synthesizes verified numbers, root causes, and recommended actions into an executive-ready brief with SHA-256 provenance links. |
 
 #### Example Output: Structured Decision Brief
 
@@ -233,9 +233,10 @@ Procurement processing costs experienced an increase of **+28.4%** ($68,000 vs. 
 In addition to tools, Workflow Intelligence MCP exposes standardized protocol primitives:
 
 ### MCP Resources
-- `workflow://process-maps/{process_name}`: Live structural process graphs generated from event logs.
-- `workflow://exceptions/active`: Real-time index of open workflow exceptions and priority queues.
+- `workflow://process-maps/{process_name}`: Dynamic Directly-Follows Graphs resolved from any registered event log in `sample-data/`.
+- `workflow://exceptions/active`: Real-time index of open workflow exceptions and priority queues from `ExceptionRepository`.
 - `workflow://metrics/kpi-definitions`: Deterministic SQL definitions and calculation formulas.
+- `workflow://audit/recent`: Recent immutable audit trail entries capturing system decisions and escalations.
 
 ### MCP Prompts
 - `process_bottleneck_review`: Pre-structured prompt for comprehensive operational workflow analysis.
@@ -428,9 +429,10 @@ pytest --cov=workflow_intelligence --cov-report=term-missing
 ## Roadmap
 
 - [x] Initial design, protocol architecture, and AGENTS.md operational manual.
-- [ ] **v0.1.0 (MVP):** Core Pydantic schemas, PM4Py CSV log reconstruction, DuckDB analytics service, FastMCP STDIO server.
-- [ ] **v0.5.0 (Engineering Maturity):** PostgreSQL repository persistence, Temporal/n8n mock connectors, MCP Resources & Prompts, Docker Compose setup.
-- [ ] **v1.0.0 (Production Ready):** Complete CI/CD GitHub Actions, end-to-end procurement demo with synthetic ERP datasets, OpenTelemetry tracing.
+- [x] **v0.1.0 (MVP):** Core Pydantic schemas, PM4Py CSV log reconstruction, DuckDB analytics service, FastMCP STDIO server.
+- [x] **v0.5.0 (Engineering Maturity):** PostgreSQL repository persistence, Temporal/n8n mock connectors, MCP Resources & Prompts, Docker Compose setup.
+- [x] **v1.0.0 (Production Ready):** Complete CI/CD GitHub Actions, end-to-end procurement demo with synthetic ERP datasets, OpenTelemetry tracing.
+- [x] **v1.0.1 (Enterprise Hardening):** Zero-hardcoding, dynamic SQL metric injection, universal dataset support (Amul dairy cold-chain benchmarks).
 
 ---
 

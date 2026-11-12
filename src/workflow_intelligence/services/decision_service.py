@@ -3,9 +3,15 @@
 Coordinates :class:`AnalyticsService` (verified metrics) and
 :class:`ReportingService` (structured briefs). All numbers flow through
 DuckDB; the service never asks an LLM to compute a figure.
+
+The service follows a universal contract: every call carries an explicit
+``source_uri`` and timeframe column/values, so it works against any
+enterprise dataset with zero hardcoded procurement assumptions.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 from workflow_intelligence.schemas.decision import (
     DecisionBrief,
@@ -29,6 +35,18 @@ class DecisionServiceError(Exception):
     """Raised when decision service operations fail."""
 
 
+def _table_name_from_uri(source_uri: str) -> str:
+    """Derive a safe DuckDB table name from a source URI.
+
+    Sanitizes the file stem so it can be used as a SQL identifier.
+    """
+    stem = Path(source_uri).stem
+    safe = "".join(c if c.isalnum() or c == "_" else "_" for c in stem)
+    if not safe or safe[0].isdigit():
+        safe = "t_" + safe
+    return safe
+
+
 class DecisionService:
     """Application service for the decision_intelligence tool suite."""
 
@@ -43,27 +61,33 @@ class DecisionService:
     def analyze_kpi_performance(
         self,
         request: KPICalculationRequest,
-        source_uri: str = DEFAULT_SOURCE_URI,
-        table_name: str = DEFAULT_TABLE,
-        current_quarter: str = DEFAULT_CURRENT_QUARTER,
-        baseline_quarter: str = DEFAULT_BASELINE_QUARTER,
     ) -> PerformanceAnalysisResult:
-        """Compute period-over-period KPI performance.
+        """Compute period-over-period KPI performance for any dataset.
 
         Args:
-            request: KPI calculation request.
-            source_uri: Source CSV file registered as a DuckDB view.
-            table_name: Logical table name for the source data.
-            current_quarter: Current period identifier.
-            baseline_quarter: Baseline period identifier.
+            request: KPI calculation request carrying source URI, timeframe
+                column, current/baseline periods, and optional custom
+                expression.
 
         Returns:
             A :class:`PerformanceAnalysisResult` with baseline, current, and
             delta percentage.
         """
-        self._analytics.use_source(source_uri, table_name)
+        table_name = _table_name_from_uri(request.source_uri)
+        self._analytics.use_source(request.source_uri, table_name)
+        # Register a dynamic metric if a custom expression is supplied.
+        if request.custom_expression is not None:
+            self._analytics.register_custom_metric(
+                request.metric_name,
+                request.custom_expression,
+                column=request.metric_name,
+            )
         comparison = self._analytics.compare_periods(
-            table_name, request.metric_name, current_quarter, baseline_quarter
+            table_name,
+            request.metric_name,
+            request.timeframe_column,
+            request.timeframe_current,
+            request.timeframe_baseline,
         )
         return PerformanceAnalysisResult(
             metric_name=comparison.metric_name,
@@ -75,40 +99,50 @@ class DecisionService:
     def explain_kpi_deviation(
         self,
         request: KPIExplanationRequest,
-        source_uri: str = DEFAULT_SOURCE_URI,
-        table_name: str = DEFAULT_TABLE,
-        dimension_col: str = "department",
-        current_quarter: str = DEFAULT_CURRENT_QUARTER,
-        baseline_quarter: str = DEFAULT_BASELINE_QUARTER,
     ) -> DeviationExplanation:
         """Explain a KPI deviation using verified dimensional drivers.
 
         Attributes the observed delta to the top contributing dimension values
         and attaches deterministic statistical significance indicators.
+        Dynamically infers the segmentation dimension when none is provided.
 
         Args:
-            request: KPI explanation request.
-            source_uri: Source CSV file registered as a DuckDB view.
-            table_name: Logical table name for the source data.
-            dimension_col: Column to segment the deviation by.
-            current_quarter: Current period identifier.
-            baseline_quarter: Baseline period identifier.
+            request: KPI explanation request carrying source URI, timeframe
+                column, current/baseline periods, observed delta, optional
+                dimension, and optional custom expression.
 
         Returns:
             A :class:`DeviationExplanation` with top contributors, significance
             indicators, and a number-only narrative.
         """
-        self._analytics.use_source(source_uri, table_name)
+        table_name = _table_name_from_uri(request.source_uri)
+        self._analytics.use_source(request.source_uri, table_name)
+        # Register a dynamic metric if a custom expression is supplied.
+        if request.custom_expression is not None:
+            self._analytics.register_custom_metric(
+                request.metric_name,
+                request.custom_expression,
+                column=request.metric_name,
+            )
+
+        # Dynamically infer the dimension column when none is provided.
+        dimension_col = request.dimension
+        if dimension_col is None:
+            dimension_col = self._analytics.infer_dimension_column(table_name)
 
         attributions = self._analytics.rank_dimensions(
             table_name,
             request.metric_name,
             dimension_col,
-            current_quarter,
-            baseline_quarter,
+            request.timeframe_current,
+            request.timeframe_baseline,
+            timeframe_column=request.timeframe_column,
         )
         stats = self._analytics.metric_stats(
-            table_name, request.metric_name, current_quarter
+            table_name,
+            request.metric_name,
+            request.timeframe_column,
+            request.timeframe_current,
         )
         significance = self._analytics.significance_for_delta(
             request.observed_delta, 0.0, stats["std_dev"]
@@ -119,7 +153,7 @@ class DecisionService:
         if stats["count"] == 0:
             warning = (
                 f"No records found for metric '{request.metric_name}' in "
-                f"{current_quarter}; deviation cannot be explained."
+                f"{request.timeframe_current}; deviation cannot be explained."
             )
         elif not significance["significant"]:
             warning = (
@@ -165,6 +199,7 @@ class DecisionService:
         request: DecisionBriefRequest,
         source_uri: str = DEFAULT_SOURCE_URI,
         table_name: str = DEFAULT_TABLE,
+        timeframe_column: str = "quarter",
         current_quarter: str = DEFAULT_CURRENT_QUARTER,
         baseline_quarter: str = DEFAULT_BASELINE_QUARTER,
     ) -> DecisionBrief:
@@ -172,11 +207,20 @@ class DecisionService:
 
         Delegates to :class:`ReportingService`, which builds the brief
         exclusively from verified DuckDB metrics.
+
+        Args:
+            request: Decision brief request.
+            source_uri: Source CSV file registered as a DuckDB view.
+            table_name: Logical table name for the source data.
+            timeframe_column: Column used for period filtering.
+            current_quarter: Current period identifier.
+            baseline_quarter: Baseline period identifier.
         """
         return self._reporting.generate_brief(
             request,
             source_uri=source_uri,
             table_name=table_name,
+            timeframe_column=timeframe_column,
             current_quarter=current_quarter,
             baseline_quarter=baseline_quarter,
         )

@@ -461,20 +461,29 @@ class TestDecisionSchemas:
     """Tests for KPI variance and decision brief data models."""
 
     def test_kpi_calculation_request(self) -> None:
-        """KPICalculationRequest should require metric_name and both timeframes."""
+        """KPICalculationRequest requires metric_name, source_uri, timeframes."""
         req = KPICalculationRequest(
             metric_name="procurement_cost",
+            source_uri="sample-data/procurement_costs.csv",
+            timeframe_column="quarter",
             timeframe_current="Q3-2026",
             timeframe_baseline="Q2-2026",
         )
         assert req.metric_name == "procurement_cost"
+        assert req.source_uri == "sample-data/procurement_costs.csv"
+        assert req.timeframe_column == "quarter"
         assert req.timeframe_current == "Q3-2026"
         assert req.timeframe_baseline == "Q2-2026"
+        assert req.custom_expression is None
 
     def test_kpi_explanation_request(self) -> None:
-        """KPIExplanationRequest should require metric_name and observed_delta."""
+        """KPIExplanationRequest requires metric_name, source_uri, delta."""
         req = KPIExplanationRequest(
             metric_name="procurement_cost",
+            source_uri="sample-data/procurement_costs.csv",
+            timeframe_column="quarter",
+            timeframe_current="Q3-2026",
+            timeframe_baseline="Q2-2026",
             observed_delta=28.4,
             dimension="department",
         )
@@ -483,9 +492,17 @@ class TestDecisionSchemas:
         assert req.dimension == "department"
 
     def test_kpi_explanation_request_defaults(self) -> None:
-        """KPIExplanationRequest should default dimension to None."""
-        req = KPIExplanationRequest(metric_name="cost", observed_delta=5.0)
+        """KPIExplanationRequest defaults dimension and custom_expression."""
+        req = KPIExplanationRequest(
+            metric_name="cost",
+            source_uri="sample-data/procurement_costs.csv",
+            timeframe_column="quarter",
+            timeframe_current="Q3-2026",
+            timeframe_baseline="Q2-2026",
+            observed_delta=5.0,
+        )
         assert req.dimension is None
+        assert req.custom_expression is None
 
     def test_decision_brief_request(self) -> None:
         """DecisionBriefRequest should require topic with optional metric_ids."""

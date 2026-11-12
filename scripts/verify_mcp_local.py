@@ -182,6 +182,8 @@ async def main() -> int:
                 "decision_analyze_kpi_performance",
                 {
                     "metric_name": "processing_cost",
+                    "source_uri": str(COSTS_CSV),
+                    "timeframe_column": "quarter",
                     "timeframe_current": "Q3",
                     "timeframe_baseline": "Q2",
                 },
@@ -204,6 +206,10 @@ async def main() -> int:
                 "decision_explain_kpi_deviation",
                 {
                     "metric_name": "processing_cost",
+                    "source_uri": str(COSTS_CSV),
+                    "timeframe_column": "quarter",
+                    "timeframe_current": "Q3",
+                    "timeframe_baseline": "Q2",
                     "observed_delta": 925.0,
                     "dimension": "department",
                 },

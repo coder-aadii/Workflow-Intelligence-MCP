@@ -1,0 +1,43 @@
+case_id,activity,timestamp,resource,department,plant_id,shift,estimated_cost,currency
+DC-0001,Milk Collection,2026-07-01T06:00:00,R1,Procurement,P1,Morning,5000,INR
+DC-0001,Chilling,2026-07-01T06:45:00,R2,Production,P1,Morning,0,INR
+DC-0001,Quality Test,2026-07-01T07:30:00,R3,Quality Assurance,P1,Morning,200,INR
+DC-0001,Pasteurization,2026-07-01T08:00:00,R4,Production,P1,Morning,800,INR
+DC-0001,Packaging,2026-07-01T09:30:00,R5,Production,P1,Morning,300,INR
+DC-0001,Cold Storage,2026-07-01T10:15:00,R6,Logistics,P1,Morning,100,INR
+DC-0001,Dispatch,2026-07-01T11:00:00,R7,Logistics,P1,Morning,150,INR
+DC-0002,Milk Collection,2026-07-01T06:00:00,R1,Procurement,P2,Morning,5200,INR
+DC-0002,Chilling,2026-07-01T08:30:00,R2,Production,P2,Morning,0,INR
+DC-0002,Quality Test,2026-07-01T09:15:00,R3,Quality Assurance,P2,Morning,200,INR
+DC-0002,Pasteurization,2026-07-01T09:45:00,R4,Production,P2,Morning,850,INR
+DC-0002,Packaging,2026-07-01T11:00:00,R5,Production,P2,Morning,320,INR
+DC-0002,Cold Storage,2026-07-01T11:45:00,R6,Logistics,P2,Morning,110,INR
+DC-0002,Dispatch,2026-07-01T12:30:00,R7,Logistics,P2,Morning,160,INR
+DC-0003,Milk Collection,2026-07-02T06:00:00,R1,Procurement,P1,Morning,5100,INR
+DC-0003,Chilling,2026-07-02T06:50:00,R2,Production,P1,Morning,0,INR
+DC-0003,Quality Test,2026-07-02T07:40:00,R3,Quality Assurance,P1,Morning,210,INR
+DC-0003,Pasteurization,2026-07-02T08:15:00,R4,Production,P1,Morning,820,INR
+DC-0003,Packaging,2026-07-02T09:45:00,R5,Production,P1,Morning,310,INR
+DC-0003,Cold Storage,2026-07-02T10:30:00,R6,Logistics,P1,Morning,105,INR
+DC-0003,Dispatch,2026-07-02T11:15:00,R7,Logistics,P1,Morning,155,INR
+DC-0004,Milk Collection,2026-07-02T06:00:00,R8,Procurement,P2,Evening,5300,INR
+DC-0004,Chilling,2026-07-02T09:00:00,R2,Production,P2,Evening,0,INR
+DC-0004,Quality Test,2026-07-02T09:45:00,R3,Quality Assurance,P2,Evening,220,INR
+DC-0004,Pasteurization,2026-07-02T10:15:00,R4,Production,P2,Evening,870,INR
+DC-0004,Packaging,2026-07-02T12:00:00,R5,Production,P2,Evening,330,INR
+DC-0004,Cold Storage,2026-07-02T12:45:00,R6,Logistics,P2,Evening,115,INR
+DC-0004,Dispatch,2026-07-02T13:30:00,R7,Logistics,P2,Evening,165,INR
+DC-0005,Milk Collection,2026-07-03T06:00:00,R1,Procurement,P1,Morning,5050,INR
+DC-0005,Chilling,2026-07-03T08:00:00,R2,Production,P1,Morning,0,INR
+DC-0005,Quality Test,2026-07-03T08:50:00,R3,Quality Assurance,P1,Morning,205,INR
+DC-0005,Pasteurization,2026-07-03T09:30:00,R4,Production,P1,Morning,810,INR
+DC-0005,Packaging,2026-07-03T11:00:00,R5,Production,P1,Morning,315,INR
+DC-0005,Cold Storage,2026-07-03T11:45:00,R6,Logistics,P1,Morning,108,INR
+DC-0005,Dispatch,2026-07-03T12:30:00,R7,Logistics,P1,Morning,158,INR
+DC-0006,Milk Collection,2026-07-03T06:00:00,R8,Procurement,P2,Evening,5250,INR
+DC-0006,Chilling,2026-07-03T09:30:00,R2,Production,P2,Evening,0,INR
+DC-0006,Quality Test,2026-07-03T10:15:00,R3,Quality Assurance,P2,Evening,215,INR
+DC-0006,Pasteurization,2026-07-03T10:45:00,R4,Production,P2,Evening,860,INR
+DC-0006,Packaging,2026-07-03T12:30:00,R5,Production,P2,Evening,325,INR
+DC-0006,Cold Storage,2026-07-03T13:15:00,R6,Logistics,P2,Evening,112,INR
+DC-0006,Dispatch,2026-07-03T14:00:00,R7,Logistics,P2,Evening,162,INR

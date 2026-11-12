@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastmcp import FastMCP
 
@@ -36,6 +37,7 @@ from workflow_intelligence.tools.process_discovery import register_process_tools
 logger = get_logger("workflow_intelligence.server")
 
 DEFAULT_SOURCE_URI = "sample-data/procurement_events.csv"
+DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "sample-data"
 
 
 @asynccontextmanager
@@ -119,7 +121,9 @@ def create_server() -> FastMCP:
     register_exception_tools(mcp, exception_service)
     register_decision_tools(mcp, decision_service)
 
-    register_resources(mcp, process_service, DEFAULT_SOURCE_URI)
+    register_resources(
+        mcp, process_service, DEFAULT_SOURCE_URI, data_dir=DEFAULT_DATA_DIR
+    )
     register_prompts(mcp)
 
     logger.info(

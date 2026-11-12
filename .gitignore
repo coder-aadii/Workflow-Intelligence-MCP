@@ -83,6 +83,7 @@ n8n-data/
 # IDE and Editor Files
 .vscode/
 .idea/
+.claude/
 *.sublime-project
 *.sublime-workspace
 *.swp

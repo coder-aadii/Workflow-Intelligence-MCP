@@ -201,6 +201,8 @@ class TestServerProtocolExecution:
         result = service.analyze_kpi_performance(
             KPICalculationRequest(
                 metric_name="processing_cost",
+                source_uri=str(COSTS_CSV),
+                timeframe_column="quarter",
                 timeframe_current="Q3",
                 timeframe_baseline="Q2",
             )
@@ -215,6 +217,10 @@ class TestServerProtocolExecution:
         explanation = service.explain_kpi_deviation(
             KPIExplanationRequest(
                 metric_name="processing_cost",
+                source_uri=str(COSTS_CSV),
+                timeframe_column="quarter",
+                timeframe_current="Q3",
+                timeframe_baseline="Q2",
                 observed_delta=925.0,
                 dimension="department",
             )
@@ -263,6 +269,8 @@ class TestServerProtocolErrorResilience:
             service.analyze_kpi_performance(
                 KPICalculationRequest(
                     metric_name="nonexistent_metric",
+                    source_uri=str(COSTS_CSV),
+                    timeframe_column="quarter",
                     timeframe_current="Q3",
                     timeframe_baseline="Q2",
                 )

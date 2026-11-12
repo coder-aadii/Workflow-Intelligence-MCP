@@ -179,6 +179,8 @@ def step3_decide(decision_service: DecisionService) -> None:
     perf = decision_service.analyze_kpi_performance(
         KPICalculationRequest(
             metric_name="processing_cost",
+            source_uri=str(COSTS_CSV),
+            timeframe_column="quarter",
             timeframe_current="Q3",
             timeframe_baseline="Q2",
         )
@@ -192,6 +194,10 @@ def step3_decide(decision_service: DecisionService) -> None:
     explanation = decision_service.explain_kpi_deviation(
         KPIExplanationRequest(
             metric_name="processing_cost",
+            source_uri=str(COSTS_CSV),
+            timeframe_column="quarter",
+            timeframe_current="Q3",
+            timeframe_baseline="Q2",
             observed_delta=perf.current_value - perf.baseline_value,
             dimension="department",
         )

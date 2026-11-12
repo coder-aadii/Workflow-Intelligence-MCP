@@ -287,3 +287,187 @@ Provenance Footnotes, Recommended Interventions).
   `data_insufficient: true` with an explicit `warning` rather than
   fabricating figures.
 - Unknown metric IDs raise a validation error — no metric is ever invented.
+
+---
+
+## Testing from the Terminal
+
+All commands run offline against the `sample-data/` fixtures — no internet
+required.
+
+### 1. Run the full verification script (9 tools + 4 resources + 3 prompts)
+
+```bash
+.venv/bin/python scripts/verify_mcp_local.py
+```
+
+### 2. Run the end-to-end procurement demo (DISCOVER → RESOLVE → DECIDE)
+
+```bash
+.venv/bin/python demo/procurement/run_demo.py
+```
+
+### 3. Call individual decision tools
+
+```bash
+# KPI performance (period-over-period variance)
+.venv/bin/python -c "
+from workflow_intelligence.services.decision_service import DecisionService
+from workflow_intelligence.schemas.decision import KPICalculationRequest
+svc = DecisionService()
+r = svc.analyze_kpi_performance(KPICalculationRequest(
+    metric_name='processing_cost',
+    source_uri='sample-data/procurement_costs.csv',
+    timeframe_column='quarter',
+    timeframe_current='Q3',
+    timeframe_baseline='Q2',
+))
+print(r)
+"
+
+# KPI deviation explanation
+.venv/bin/python -c "
+from workflow_intelligence.services.decision_service import DecisionService
+from workflow_intelligence.schemas.decision import KPIExplanationRequest
+svc = DecisionService()
+r = svc.explain_kpi_deviation(KPIExplanationRequest(
+    metric_name='processing_cost',
+    source_uri='sample-data/procurement_costs.csv',
+    timeframe_column='quarter',
+    timeframe_current='Q3',
+    timeframe_baseline='Q2',
+    observed_delta=925.0,
+    dimension='department',
+))
+print(r.explanation)
+"
+
+# Decision brief
+.venv/bin/python -c "
+from workflow_intelligence.services.decision_service import DecisionService
+from workflow_intelligence.schemas.decision import DecisionBriefRequest
+svc = DecisionService()
+r = svc.generate_brief(DecisionBriefRequest(
+    topic='Q3 Procurement Cost Inflation',
+    metric_ids=['processing_cost', 'order_count'],
+))
+print(r.topic, len(r.findings), 'findings')
+"
+```
+
+### 4. Call process discovery tools
+
+```bash
+# Analyze business process
+.venv/bin/python -c "
+from workflow_intelligence.services.process_service import ProcessService
+from workflow_intelligence.schemas.process import ProcessAnalyzeRequest
+svc = ProcessService()
+r = svc.analyze_business_process(ProcessAnalyzeRequest(
+    source_uri='sample-data/procurement_events.csv',
+    case_id_col='case_id',
+    activity_col='activity',
+    timestamp_col='timestamp',
+))
+print('cases:', r.total_cases, '| events:', r.total_events, '| variants:', r.variant_count)
+"
+
+# Identify bottlenecks
+.venv/bin/python -c "
+from workflow_intelligence.services.process_service import ProcessService
+from workflow_intelligence.schemas.process import BottleneckRequest
+svc = ProcessService()
+r = svc.identify_bottlenecks(BottleneckRequest(
+    source_uri='sample-data/procurement_events.csv', threshold_std_dev=2.0
+))
+print('bottlenecks:', len(r.bottlenecks))
+for b in r.bottlenecks:
+    print(f'  {b.stage_transition}: z={b.z_score:.2f}')
+"
+
+# Score automation opportunities
+.venv/bin/python -c "
+from workflow_intelligence.services.process_service import ProcessService
+from workflow_intelligence.schemas.process import AutomationScoreRequest
+svc = ProcessService()
+r = svc.score_automation_opportunities(AutomationScoreRequest(
+    source_uri='sample-data/procurement_events.csv', min_frequency=10
+))
+for c in r.candidates:
+    print(f'  rank {c.rank}: {c.activity_name} score={c.automation_potential_score:.2f}')
+"
+```
+
+### 5. Call exception resolver tools
+
+```bash
+# Investigate a failure
+.venv/bin/python -c "
+from workflow_intelligence.services.exception_service import ExceptionService
+from workflow_intelligence.schemas.exception import WorkflowInvestigationRequest
+svc = ExceptionService()
+r = svc.investigate_failure(WorkflowInvestigationRequest(
+    case_id='PO-9001',
+    workflow_type='purchase_order_creation',
+    failure_payload={
+        'vendor_name': 'ABC Technologies',
+        'tax_id': 'TX-123456',
+        'discrepancy': 'vendor_name_typo',
+        'master_records': [{
+            'entity_id': 'VEND-001',
+            'registered_name': 'ABC Technology Pvt Ltd',
+            'tax_id': 'TX-123456',
+        }],
+    },
+))
+print(r.category, '| auto_resolvable:', r.auto_resolvable)
+"
+
+# Recommend resolution
+.venv/bin/python -c "
+from workflow_intelligence.services.exception_service import ExceptionService
+from workflow_intelligence.schemas.exception import ResolutionRequest
+svc = ExceptionService()
+r = svc.recommend_resolution(ResolutionRequest(
+    exception_id='EXC-001',
+    policy_context={'auto_approve': True, 'approval_tier': 'manager'},
+))
+print('auto_resolve:', r.auto_resolve, '|', r.remediation_action)
+"
+
+# Escalate a case
+.venv/bin/python -c "
+from workflow_intelligence.services.exception_service import ExceptionService
+svc = ExceptionService()
+r = svc.escalate_case(
+    case_id='PO-9002',
+    reason='Missing department cost-center code',
+    target_department='Finance',
+)
+print(r.ticket_id, '|', r.routed_department, '|', r.priority)
+```
+
+### 6. Start the MCP server over SSE (for MCP clients)
+
+```bash
+# Terminal 1 — start the server
+.venv/bin/python -m workflow_intelligence.server --transport sse --port 8000
+
+# Terminal 2 — query a resource via curl
+curl -N http://localhost:8000/sse
+```
+
+Or connect Claude Desktop / Cursor via STDIO:
+
+```json
+{
+  "mcpServers": {
+    "workflow-intelligence": {
+      "command": "python",
+      "args": ["-m", "workflow_intelligence.server", "--transport", "stdio"],
+      "cwd": "/home/rails/Work/Github-Repos/workflow-intelligence-mcp"
+    }
+  }
+}
+```
+

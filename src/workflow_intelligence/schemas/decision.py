@@ -10,35 +10,86 @@ from .common import BaseMCPResponse
 class KPICalculationRequest(BaseModel):
     """Request to calculate KPI performance across two timeframes.
 
+    Universal contract: the caller supplies the dataset URI and the
+    timeframe column/values, so the tool works against any enterprise
+    dataset with zero hardcoded procurement assumptions.
+
     Attributes:
-        metric_name: Name of the KPI metric.
-        timeframe_current: Current timeframe specification.
-        timeframe_baseline: Baseline timeframe specification.
+        metric_name: Name of the KPI metric (or "custom" for custom_expression).
+        source_uri: Path or URI to the dataset (CSV/Parquet).
+        timeframe_column: Column used for period filtering.
+        timeframe_current: Current period identifier.
+        timeframe_baseline: Baseline period identifier.
+        custom_expression: Optional dynamic DuckDB SQL aggregation expression
+            (e.g. ``"100.0 * SUM(spoiled) / SUM(total)"``).
     """
 
     metric_name: str = Field(..., min_length=1, description="Name of the KPI metric.")
+    source_uri: str = Field(
+        ..., min_length=1, description="Path or URI to the dataset (CSV/Parquet)."
+    )
+    timeframe_column: str = Field(
+        default="timeframe",
+        description="Column used for period filtering.",
+    )
     timeframe_current: str = Field(
-        ..., min_length=1, description="Current timeframe specification."
+        ..., min_length=1, description="Current period identifier."
     )
     timeframe_baseline: str = Field(
-        ..., min_length=1, description="Baseline timeframe specification."
+        ..., min_length=1, description="Baseline period identifier."
+    )
+    custom_expression: str | None = Field(
+        default=None,
+        description=(
+            "Optional dynamic DuckDB SQL aggregation expression, e.g. "
+            "'100.0 * SUM(spoiled) / SUM(total)'."
+        ),
     )
 
 
 class KPIExplanationRequest(BaseModel):
     """Request to explain a KPI deviation.
 
+    Universal contract: the caller supplies the dataset URI and the
+    timeframe column/values, so the tool works against any enterprise
+    dataset with zero hardcoded procurement assumptions.
+
     Attributes:
         metric_name: Name of the KPI metric.
+        source_uri: Path or URI to the dataset (CSV/Parquet).
+        timeframe_column: Column used for period filtering.
+        timeframe_current: Current period identifier.
+        timeframe_baseline: Baseline period identifier.
         observed_delta: Observed delta value.
         dimension: Optional dimension to segment the deviation by.
+        custom_expression: Optional dynamic DuckDB SQL aggregation expression.
     """
 
     metric_name: str = Field(..., min_length=1, description="Name of the KPI metric.")
+    source_uri: str = Field(
+        ..., min_length=1, description="Path or URI to the dataset (CSV/Parquet)."
+    )
+    timeframe_column: str = Field(
+        default="timeframe",
+        description="Column used for period filtering.",
+    )
+    timeframe_current: str = Field(
+        ..., min_length=1, description="Current period identifier."
+    )
+    timeframe_baseline: str = Field(
+        ..., min_length=1, description="Baseline period identifier."
+    )
     observed_delta: float = Field(..., description="Observed delta value.")
     dimension: str | None = Field(
         default=None,
         description="Optional dimension to segment the deviation by.",
+    )
+    custom_expression: str | None = Field(
+        default=None,
+        description=(
+            "Optional dynamic DuckDB SQL aggregation expression, e.g. "
+            "'100.0 * SUM(spoiled) / SUM(total)'."
+        ),
     )
 
 

@@ -119,7 +119,11 @@ class TestAnalyticsService:
         self, analytics_service: AnalyticsService
     ) -> None:
         comparison = analytics_service.compare_periods(
-            "procurement_costs", "processing_cost", "Q3", "Q2"
+            "procurement_costs",
+            "processing_cost",
+            "quarter",
+            "Q3",
+            "Q2",
         )
         assert isinstance(comparison, MetricComparison)
         assert comparison.metric_name == "processing_cost"
@@ -138,7 +142,7 @@ class TestAnalyticsService:
         self, analytics_service: AnalyticsService
     ) -> None:
         comparison = analytics_service.compare_periods(
-            "procurement_costs", "order_count", "Q3", "Q2"
+            "procurement_costs", "order_count", "quarter", "Q3", "Q2"
         )
         assert comparison.absolute_variance == 0.0
         assert comparison.relative_variance_percentage == 0.0
@@ -147,7 +151,12 @@ class TestAnalyticsService:
         self, analytics_service: AnalyticsService
     ) -> None:
         attributions = analytics_service.rank_dimensions(
-            "procurement_costs", "processing_cost", "department", "Q3", "Q2"
+            "procurement_costs",
+            "processing_cost",
+            "department",
+            "Q3",
+            "Q2",
+            timeframe_column="quarter",
         )
         assert len(attributions) >= 1
         # Independent per-quarter per-department sums with pandas.
@@ -178,7 +187,12 @@ class TestAnalyticsService:
         self, analytics_service: AnalyticsService
     ) -> None:
         attributions = analytics_service.rank_dimensions(
-            "procurement_costs", "order_count", "department", "Q3", "Q2"
+            "procurement_costs",
+            "order_count",
+            "department",
+            "Q3",
+            "Q2",
+            timeframe_column="quarter",
         )
         assert len(attributions) >= 1
         df = pd.read_csv(PROCUREMENT_CSV)
@@ -204,7 +218,7 @@ class TestAnalyticsService:
 
     def test_metric_stats(self, analytics_service: AnalyticsService) -> None:
         stats = analytics_service.metric_stats(
-            "procurement_costs", "processing_cost", "Q3"
+            "procurement_costs", "processing_cost", "quarter", "Q3"
         )
         df = pd.read_csv(PROCUREMENT_CSV)
         q3 = df[df["quarter"] == "Q3"]["processing_cost"]
@@ -224,8 +238,49 @@ class TestAnalyticsService:
     def test_unknown_metric_raises(self, analytics_service: AnalyticsService) -> None:
         with pytest.raises(AnalyticsServiceError):
             analytics_service.compare_periods(
-                "procurement_costs", "nonexistent_metric", "Q3", "Q2"
+                "procurement_costs",
+                "nonexistent_metric",
+                "quarter",
+                "Q3",
+                "Q2",
             )
+
+    def test_register_custom_metric(self, analytics_service: AnalyticsService) -> None:
+        analytics_service.register_custom_metric(
+            "custom_ratio",
+            "100.0 * SUM(spoiled) / SUM(total)",
+            column="total",
+        )
+        assert "custom_ratio" in analytics_service._custom_metrics
+        spec = analytics_service._spec("custom_ratio")
+        assert spec["expression"] == "100.0 * SUM(spoiled) / SUM(total)"
+
+    def test_custom_expression_injection_rejected(
+        self, analytics_service: AnalyticsService
+    ) -> None:
+        with pytest.raises(AnalyticsServiceError):
+            analytics_service.register_custom_metric(
+                "bad", "DROP TABLE procurement_costs", column="x"
+            )
+        with pytest.raises(AnalyticsServiceError):
+            analytics_service.register_custom_metric(
+                "bad2", "SELECT * FROM procurement_costs", column="x"
+            )
+        with pytest.raises(AnalyticsServiceError):
+            analytics_service.register_custom_metric(
+                "bad3", "1; DELETE FROM procurement_costs", column="x"
+            )
+
+    def test_compute_dynamic_metric(self, analytics_service: AnalyticsService) -> None:
+        value = analytics_service.compute_dynamic_metric(
+            "procurement_costs",
+            "SUM(processing_cost)",
+            where_sql="quarter = ?",
+            parameters=["Q3"],
+        )
+        df = pd.read_csv(PROCUREMENT_CSV)
+        expected = df[df["quarter"] == "Q3"]["processing_cost"].sum()
+        assert value == expected
 
     def test_available_metrics_documented(self) -> None:
         assert "processing_cost" in METRIC_REGISTRY
@@ -237,22 +292,54 @@ class TestDecisionService:
     """Tests for the decision orchestration service."""
 
     def test_analyze_kpi_performance(self, decision_service: DecisionService) -> None:
+        df = pd.read_csv(PROCUREMENT_CSV)
+        q2 = df[df["quarter"] == "Q2"]["processing_cost"].sum()
+        q3 = df[df["quarter"] == "Q3"]["processing_cost"].sum()
         result = decision_service.analyze_kpi_performance(
             KPICalculationRequest(
                 metric_name="processing_cost",
+                source_uri=PROCUREMENT_CSV,
+                timeframe_column="quarter",
                 timeframe_current="Q3",
                 timeframe_baseline="Q2",
             )
         )
         assert isinstance(result, PerformanceAnalysisResult)
         assert result.success is True
-        # Independent verification with pandas.
-        df = pd.read_csv(PROCUREMENT_CSV)
-        q2 = df[df["quarter"] == "Q2"]["processing_cost"].sum()
-        q3 = df[df["quarter"] == "Q3"]["processing_cost"].sum()
         assert result.baseline_value == q2
         assert result.current_value == q3
         assert result.delta_percentage == (q3 - q2) / q2 * 100.0
+
+    def test_analyze_kpi_performance_custom_expression(self) -> None:
+        # A dataset without "processing_cost" but with spoilage columns.
+        rows = [
+            {"plant_id": "P1", "timeframe": "August", "spoiled": 10, "total": 1000},
+            {"plant_id": "P1", "timeframe": "July", "spoiled": 5, "total": 1000},
+            {"plant_id": "P2", "timeframe": "August", "spoiled": 20, "total": 1000},
+            {"plant_id": "P2", "timeframe": "July", "spoiled": 10, "total": 1000},
+        ]
+        fd, path = tempfile.mkstemp(suffix=".csv")
+        with os.fdopen(fd, "w") as fh:
+            pd.DataFrame(rows).to_csv(fh, index=False)
+        try:
+            svc = DecisionService()
+            result = svc.analyze_kpi_performance(
+                KPICalculationRequest(
+                    metric_name="spoilage_rate",
+                    source_uri=path,
+                    timeframe_column="timeframe",
+                    timeframe_current="August",
+                    timeframe_baseline="July",
+                    custom_expression="100.0 * SUM(spoiled) / SUM(total)",
+                )
+            )
+            assert result.success is True
+            aug = 30.0 / 2000.0 * 100.0
+            jul = 15.0 / 2000.0 * 100.0
+            assert abs(result.current_value - aug) < 1e-6
+            assert abs(result.baseline_value - jul) < 1e-6
+        finally:
+            os.remove(path)
 
     def test_explain_kpi_deviation_significant(
         self, decision_service: DecisionService
@@ -264,6 +351,10 @@ class TestDecisionService:
         explanation = decision_service.explain_kpi_deviation(
             KPIExplanationRequest(
                 metric_name="processing_cost",
+                source_uri=PROCUREMENT_CSV,
+                timeframe_column="quarter",
+                timeframe_current="Q3",
+                timeframe_baseline="Q2",
                 observed_delta=observed_delta,
                 dimension="department",
             )
@@ -281,17 +372,50 @@ class TestDecisionService:
         assert explanation.top_contributors[0].segment_name in explanation.explanation
         assert str(observed_delta) in explanation.explanation
 
+    def test_explain_kpi_deviation_infers_dimension(self) -> None:
+        # Dataset without a "department" column - dimension should be inferred.
+        rows = [
+            {"plant_id": "P1", "quarter": "Q2", "processing_cost": 100},
+            {"plant_id": "P2", "quarter": "Q2", "processing_cost": 200},
+            {"plant_id": "P1", "quarter": "Q3", "processing_cost": 500},
+            {"plant_id": "P2", "quarter": "Q3", "processing_cost": 300},
+        ]
+        fd, path = tempfile.mkstemp(suffix=".csv")
+        with os.fdopen(fd, "w") as fh:
+            pd.DataFrame(rows).to_csv(fh, index=False)
+        try:
+            svc = DecisionService()
+            explanation = svc.explain_kpi_deviation(
+                KPIExplanationRequest(
+                    metric_name="processing_cost",
+                    source_uri=path,
+                    timeframe_column="quarter",
+                    timeframe_current="Q3",
+                    timeframe_baseline="Q2",
+                    observed_delta=400.0,
+                    dimension=None,
+                )
+            )
+            assert explanation.success is True
+            # Dimension should be inferred as "plant_id" (the only text col).
+            assert explanation.dimension == "plant_id"
+            assert not explanation.data_insufficient
+        finally:
+            os.remove(path)
+
     def test_explain_kpi_deviation_missing_data(
         self, decision_service: DecisionService
     ) -> None:
         explanation = decision_service.explain_kpi_deviation(
             KPIExplanationRequest(
                 metric_name="processing_cost",
+                source_uri=PROCUREMENT_CSV,
+                timeframe_column="quarter",
+                timeframe_current="Q9",
+                timeframe_baseline="Q8",
                 observed_delta=9999.0,
                 dimension="department",
-            ),
-            current_quarter="Q9",
-            baseline_quarter="Q8",
+            )
         )
         assert explanation.data_insufficient is True
         assert explanation.warning is not None
@@ -365,13 +489,13 @@ class TestDecisionService:
             explanation = svc.explain_kpi_deviation(
                 KPIExplanationRequest(
                     metric_name="processing_cost",
+                    source_uri=path,
+                    timeframe_column="quarter",
+                    timeframe_current="Q3",
+                    timeframe_baseline="Q2",
                     observed_delta=5.0,
                     dimension="department",
-                ),
-                source_uri=path,
-                table_name="flat_costs",
-                current_quarter="Q3",
-                baseline_quarter="Q2",
+                )
             )
             assert explanation.data_insufficient is True
             assert explanation.warning is not None

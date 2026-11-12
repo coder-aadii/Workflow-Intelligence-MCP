@@ -44,6 +44,7 @@ class ReportingService:
         request: DecisionBriefRequest,
         source_uri: str = DEFAULT_SOURCE_URI,
         table_name: str = DEFAULT_TABLE,
+        timeframe_column: str = "quarter",
         current_quarter: str = DEFAULT_CURRENT_QUARTER,
         baseline_quarter: str = DEFAULT_BASELINE_QUARTER,
     ) -> DecisionBrief:
@@ -53,6 +54,7 @@ class ReportingService:
             request: Decision brief request with topic and metric ids.
             source_uri: Source CSV file registered as a DuckDB view.
             table_name: Logical table name for the source data.
+            timeframe_column: Column used for period filtering.
             current_quarter: Current period identifier.
             baseline_quarter: Baseline period identifier.
 
@@ -74,19 +76,26 @@ class ReportingService:
         findings: list[MetricComparison] = []
         for metric_id in request.metric_ids:
             comparison = self._analytics.compare_periods(
-                table_name, metric_id, current_quarter, baseline_quarter
+                table_name,
+                metric_id,
+                timeframe_column,
+                current_quarter,
+                baseline_quarter,
             )
             findings.append(comparison)
 
         attributions: list[DimensionAttribution] = []
         if findings:
             primary_metric = request.metric_ids[0]
+            # Dynamically infer the dimension column instead of hardcoding "department".
+            dimension_col = self._analytics.infer_dimension_column(table_name)
             attributions = self._analytics.rank_dimensions(
                 table_name,
                 primary_metric,
-                "department",
+                dimension_col,
                 current_quarter,
                 baseline_quarter,
+                timeframe_column=timeframe_column,
             )
 
         file_hash = DuckDBAdapter.file_hash(source_uri)

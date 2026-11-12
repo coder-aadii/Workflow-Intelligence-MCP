@@ -1,0 +1,10 @@
+plant_id,timeframe,milk_received_litres,milk_spoiled_litres,fat_percent,snf_percent,processing_cost_inr,rejected_volume_litres
+P1,July,100000,5000,4.2,8.5,150000,2000
+P1,August,100000,12000,4.1,8.3,165000,3500
+P1,September,100000,3000,4.3,8.7,145000,1500
+P2,July,95000,4000,4.0,8.2,142500,1800
+P2,August,95000,15000,3.9,8.0,170000,4200
+P2,September,95000,2500,4.1,8.6,140000,1200
+P3,July,80000,3500,4.1,8.4,120000,1500
+P3,August,80000,18000,3.8,7.9,155000,5000
+P3,September,80000,2000,4.2,8.8,130000,900
