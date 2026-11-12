@@ -1,0 +1,147 @@
+"""Pydantic V2 schemas for Business Decision Intelligence (decision_* tools)."""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+from .common import BaseMCPResponse
+
+
+class KPICalculationRequest(BaseModel):
+    """Request to calculate KPI performance across two timeframes.
+
+    Attributes:
+        metric_name: Name of the KPI metric.
+        timeframe_current: Current timeframe specification.
+        timeframe_baseline: Baseline timeframe specification.
+    """
+
+    metric_name: str = Field(..., min_length=1, description="Name of the KPI metric.")
+    timeframe_current: str = Field(
+        ..., min_length=1, description="Current timeframe specification."
+    )
+    timeframe_baseline: str = Field(
+        ..., min_length=1, description="Baseline timeframe specification."
+    )
+
+
+class KPIExplanationRequest(BaseModel):
+    """Request to explain a KPI deviation.
+
+    Attributes:
+        metric_name: Name of the KPI metric.
+        observed_delta: Observed delta value.
+        dimension: Optional dimension to segment the deviation by.
+    """
+
+    metric_name: str = Field(..., min_length=1, description="Name of the KPI metric.")
+    observed_delta: float = Field(..., description="Observed delta value.")
+    dimension: str | None = Field(
+        default=None,
+        description="Optional dimension to segment the deviation by.",
+    )
+
+
+class DecisionBriefRequest(BaseModel):
+    """Request to generate a structured decision brief.
+
+    Attributes:
+        topic: Topic of the decision brief.
+        metric_ids: List of metric identifiers to include.
+    """
+
+    topic: str = Field(..., min_length=1, description="Topic of the decision brief.")
+    metric_ids: list[str] = Field(
+        default_factory=list,
+        description="List of metric identifiers to include.",
+    )
+
+
+class MetricComparison(BaseModel):
+    """Period-over-period comparison of a KPI metric.
+
+    Attributes:
+        metric_name: Name of the KPI metric.
+        baseline_value: Baseline period value.
+        current_value: Current period value.
+        absolute_variance: Absolute difference between current and baseline.
+        relative_variance_percentage: Relative variance as a percentage.
+    """
+
+    metric_name: str = Field(..., description="Name of the KPI metric.")
+    baseline_value: float = Field(..., description="Baseline period value.")
+    current_value: float = Field(..., description="Current period value.")
+    absolute_variance: float = Field(
+        ..., description="Absolute difference between current and baseline."
+    )
+    relative_variance_percentage: float = Field(
+        ..., description="Relative variance as a percentage."
+    )
+
+
+class DimensionAttribution(BaseModel):
+    """Attribution of a KPI deviation to a specific operational segment.
+
+    Attributes:
+        segment_name: Name of the operational segment.
+        contribution_percentage: Percentage contribution to the deviation (0-100).
+        record_count: Number of records supporting the attribution.
+    """
+
+    segment_name: str = Field(..., description="Name of the operational segment.")
+    contribution_percentage: float = Field(
+        default=0.0,
+        ge=0,
+        le=100,
+        description="Percentage contribution to the deviation (0-100).",
+    )
+    record_count: int = Field(
+        default=0, ge=0, description="Number of records supporting the attribution."
+    )
+
+
+class DecisionBrief(BaseMCPResponse):
+    """Structured evidence-backed decision brief.
+
+    Attributes:
+        topic: Topic of the brief.
+        executive_summary: High-level executive summary.
+        findings: List of metric comparisons supporting the findings.
+        attributions: List of dimension attributions explaining drivers.
+        provenance_links: List of verifiable data provenance links.
+        recommendations: List of actionable recommendations.
+    """
+
+    topic: str = Field(..., description="Topic of the brief.")
+    executive_summary: str = Field(..., description="High-level executive summary.")
+    findings: list[MetricComparison] = Field(
+        default_factory=list,
+        description="List of metric comparisons supporting the findings.",
+    )
+    attributions: list[DimensionAttribution] = Field(
+        default_factory=list,
+        description="List of dimension attributions explaining drivers.",
+    )
+    provenance_links: list[str] = Field(
+        default_factory=list,
+        description="List of verifiable data provenance links.",
+    )
+    recommendations: list[str] = Field(
+        default_factory=list, description="List of actionable recommendations."
+    )
+
+
+class PerformanceAnalysisResult(BaseMCPResponse):
+    """Result of KPI performance analysis.
+
+    Attributes:
+        metric_name: Name of the KPI metric.
+        baseline_value: Baseline period value.
+        current_value: Current period value.
+        delta_percentage: Percentage change from baseline.
+    """
+
+    metric_name: str = Field(..., description="Name of the KPI metric.")
+    baseline_value: float = Field(..., description="Baseline period value.")
+    current_value: float = Field(..., description="Current period value.")
+    delta_percentage: float = Field(..., description="Percentage change from baseline.")
