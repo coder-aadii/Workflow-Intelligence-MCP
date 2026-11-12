@@ -10,6 +10,7 @@ from workflow_intelligence.schemas.common import (  # noqa: F401
 from workflow_intelligence.schemas.decision import (  # noqa: F401
     DecisionBrief,
     DecisionBriefRequest,
+    DeviationExplanation,
     DimensionAttribution,
     KPICalculationRequest,
     KPIExplanationRequest,
@@ -68,6 +69,7 @@ __all__ = [
     "KPICalculationRequest",
     "KPIExplanationRequest",
     "DecisionBriefRequest",
+    "DeviationExplanation",
     "MetricComparison",
     "DimensionAttribution",
     "DecisionBrief",

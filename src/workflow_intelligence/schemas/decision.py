@@ -131,6 +131,55 @@ class DecisionBrief(BaseMCPResponse):
     )
 
 
+class DeviationExplanation(BaseMCPResponse):
+    """Explanation of a KPI deviation attributed to verified dimensional drivers.
+
+    Attributes:
+        metric_name: Name of the KPI metric being explained.
+        observed_delta: Observed delta between current and baseline.
+        dimension: Optional dimension used to segment the deviation.
+        top_contributors: Dimension attributions ranked by contribution to the delta.
+        statistical_significance: Deterministic significance indicators
+            (std_dev, z_score, significant flag).
+        explanation: Natural-language explanation drafted from verified numbers only.
+        data_insufficient: True when data is missing or statistically insignificant.
+        warning: Non-fatal warning when results should be interpreted with caution.
+    """
+
+    metric_name: str = Field(..., description="Name of the KPI metric being explained.")
+    observed_delta: float = Field(
+        ..., description="Observed delta between current and baseline."
+    )
+    dimension: str | None = Field(
+        default=None, description="Optional dimension used to segment the deviation."
+    )
+    top_contributors: list[DimensionAttribution] = Field(
+        default_factory=list,
+        description="Dimension attributions ranked by contribution to the delta.",
+    )
+    statistical_significance: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Deterministic significance indicators (std_dev, z_score, "
+            "significant flag)."
+        ),
+    )
+    explanation: str = Field(
+        ...,
+        description="Natural-language explanation drafted from verified numbers only.",
+    )
+    data_insufficient: bool = Field(
+        default=False,
+        description="True when data is missing or statistically insignificant.",
+    )
+    warning: str | None = Field(
+        default=None,
+        description=(
+            "Non-fatal warning when results should be interpreted with caution."
+        ),
+    )
+
+
 class PerformanceAnalysisResult(BaseMCPResponse):
     """Result of KPI performance analysis.
 
