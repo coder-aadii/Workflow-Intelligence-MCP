@@ -101,13 +101,13 @@ class PM4PyAdapter:
         perf_dfg = dfg_algorithm.apply(log, variant=dfg_algorithm.Variants.PERFORMANCE)
 
         result: dict[tuple[str, str], dict[str, Any]] = {}
-        for (source, target), mean_ms in perf_dfg.items():
-            # PM4Py performance DFG returns mean duration in milliseconds
+        for (source, target), mean_sec in perf_dfg.items():
+            # PM4Py performance DFG returns mean transition duration in seconds
             # as a float value directly
-            mean_ms_val = float(mean_ms)
+            mean_sec_val = float(mean_sec)
             result[(str(source), str(target))] = {
-                "mean_duration_hours": mean_ms_val / 3_600_000.0,
-                "median_duration_hours": mean_ms_val / 3_600_000.0,
+                "mean_duration_hours": mean_sec_val / 3600.0,
+                "median_duration_hours": mean_sec_val / 3600.0,
                 "std_dev_hours": 0.0,
             }
         return result
