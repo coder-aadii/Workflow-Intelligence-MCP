@@ -242,6 +242,114 @@ async def main() -> int:
         except Exception as exc:  # noqa: BLE001
             record("decision_generate_brief", False, str(exc))
 
+        # ------------------------------------------------------------------
+        # 3. Resource reads
+        # ------------------------------------------------------------------
+        try:
+            res = await client.read_resource("workflow://process-maps/procurement")
+            item = res[0]
+            data = json.loads(item.text)
+            record(
+                "resource_process_maps_procurement",
+                item.mime_type == "application/json"
+                and data.get("process_name") == "procurement"
+                and isinstance(data.get("nodes"), list)
+                and isinstance(data.get("edges"), list),
+                f"nodes={len(data.get('nodes', []))}, "
+                f"edges={len(data.get('edges', []))}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            record("resource_process_maps_procurement", False, str(exc))
+
+        try:
+            res = await client.read_resource("workflow://metrics/kpi-definitions")
+            item = res[0]
+            record(
+                "resource_kpi_definitions",
+                item.mime_type == "text/markdown"
+                and item.text.startswith("# KPI Definitions"),
+                f"mime={item.mime_type}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            record("resource_kpi_definitions", False, str(exc))
+
+        try:
+            res = await client.read_resource("workflow://exceptions/active")
+            item = res[0]
+            data = json.loads(item.text)
+            record(
+                "resource_exceptions_active",
+                item.mime_type == "application/json"
+                and data.get("kind") == "active_exceptions"
+                and isinstance(data.get("exceptions"), list),
+            )
+        except Exception as exc:  # noqa: BLE001
+            record("resource_exceptions_active", False, str(exc))
+
+        try:
+            res = await client.read_resource("workflow://audit/recent")
+            item = res[0]
+            data = json.loads(item.text)
+            record(
+                "resource_audit_recent",
+                item.mime_type == "application/json"
+                and data.get("kind") == "recent_audit_log"
+                and isinstance(data.get("entries"), list),
+            )
+        except Exception as exc:  # noqa: BLE001
+            record("resource_audit_recent", False, str(exc))
+
+        # ------------------------------------------------------------------
+        # 4. Prompt rendering
+        # ------------------------------------------------------------------
+        try:
+            result = await client.get_prompt(
+                "process_bottleneck_review",
+                arguments={
+                    "bottleneck_report": {
+                        "source_uri": "sample-data/procurement_events.csv",
+                        "total_stages_analyzed": 4,
+                        "bottlenecks": [],
+                    },
+                    "automation_report": {
+                        "candidates": [],
+                        "methodology": "score = f(frequency, duration, 1/variance)",
+                    },
+                },
+            )
+            messages = result.messages
+            text = " ".join(str(m.content) for m in messages)
+            record(
+                "prompt_process_bottleneck_review",
+                isinstance(messages, list)
+                and len(messages) >= 1
+                and "Process Bottleneck Review" in text,
+            )
+        except Exception as exc:  # noqa: BLE001
+            record("prompt_process_bottleneck_review", False, str(exc))
+
+        try:
+            result = await client.get_prompt(
+                "management_decision_brief",
+                arguments={
+                    "topic": "Q3 Cost Inflation",
+                    "metric_name": "processing_cost",
+                    "baseline_value": 100.0,
+                    "current_value": 150.0,
+                    "delta_percentage": 50.0,
+                },
+            )
+            messages = result.messages
+            text = " ".join(str(m.content) for m in messages)
+            record(
+                "prompt_management_decision_brief",
+                isinstance(messages, list)
+                and len(messages) >= 1
+                and "Management Decision Brief: Q3 Cost Inflation" in text,
+            )
+        except Exception as exc:  # noqa: BLE001
+            record("prompt_management_decision_brief", False, str(exc))
+
     # ------------------------------------------------------------------
     # Summary
     # ------------------------------------------------------------------

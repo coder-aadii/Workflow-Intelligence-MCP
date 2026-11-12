@@ -1,21 +1,30 @@
 """FastMCP protocol server for the Workflow Intelligence MCP.
 
 Assembles the three core tool suites (``process_*``, ``exception_*``,
-``decision_*``) into a single ``workflow-intelligence`` FastMCP instance,
-exposes STDIO (default) and Streamable HTTP / SSE transports, and wires
-startup/shutdown lifecycle hooks plus a CLI entry point.
+``decision_*``) plus MCP Resources, MCP Prompts, and observability
+(structured logging and OpenTelemetry tracing) into a single
+``workflow-intelligence`` FastMCP instance. Exposes STDIO (default) and
+Streamable HTTP / SSE transports, and wires startup/shutdown lifecycle
+hooks plus a CLI entry point.
 """
 
 from __future__ import annotations
 
 import argparse
-import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastmcp import FastMCP
 
 from workflow_intelligence.config import get_settings
+from workflow_intelligence.observability.logging import (
+    configure_logging,
+    get_logger,
+    log_context,
+)
+from workflow_intelligence.observability.tracing import init_tracing
+from workflow_intelligence.prompts import register_prompts
+from workflow_intelligence.resources import register_resources
 from workflow_intelligence.services.analytics_service import AnalyticsService
 from workflow_intelligence.services.decision_service import DecisionService
 from workflow_intelligence.services.exception_service import ExceptionService
@@ -24,22 +33,36 @@ from workflow_intelligence.tools.decision_intelligence import register_decision_
 from workflow_intelligence.tools.exception_resolver import register_exception_tools
 from workflow_intelligence.tools.process_discovery import register_process_tools
 
-logger = logging.getLogger("workflow_intelligence.server")
+logger = get_logger("workflow_intelligence.server")
+
+DEFAULT_SOURCE_URI = "sample-data/procurement_events.csv"
 
 
 @asynccontextmanager
 async def _lifespan(server: FastMCP) -> AsyncGenerator[None, None]:
     """Server lifespan combining startup and shutdown hooks.
 
-    Startup: initialize shared application services and register the default
+    Startup: configure structured logging and OpenTelemetry tracing,
+    initialize shared application services, and register the default
     procurement cost dataset so decision tools can resolve it without a
     caller-supplied source URI.
     Shutdown: release the DuckDB adapter connection.
     """
     settings = get_settings()
-    logger.info(
-        "Starting Workflow Intelligence MCP server (env=%s)", settings.workflow_env
+    configure_logging(
+        workflow_env=settings.workflow_env,
+        log_level=settings.log_level,
     )
+    init_tracing(workflow_env=settings.workflow_env)
+
+    with log_context(
+        correlation_id="server-startup",
+        tool_name="server",
+    ):
+        logger.info(
+            "Starting Workflow Intelligence MCP server (env=%s)",
+            settings.workflow_env,
+        )
 
     analytics = AnalyticsService()
     try:
@@ -51,35 +74,38 @@ async def _lifespan(server: FastMCP) -> AsyncGenerator[None, None]:
     try:
         yield
     finally:
-        logger.info("Shutting down Workflow Intelligence MCP server")
+        with log_context(
+            correlation_id="server-shutdown",
+            tool_name="server",
+        ):
+            logger.info("Shutting down Workflow Intelligence MCP server")
         analytics.adapter.close()
 
 
 def create_server() -> FastMCP:
     """Build and configure the unified FastMCP server.
 
-    Registers all nine domain tools across the three tool suites:
+    Registers:
 
-    - ``process_analyze_business_process``
-    - ``process_identify_bottlenecks``
-    - ``process_score_automation_opportunities``
-    - ``exception_investigate_workflow``
-    - ``exception_recommend_resolution``
-    - ``exception_escalate_case``
-    - ``decision_analyze_kpi_performance``
-    - ``decision_explain_kpi_deviation``
-    - ``decision_generate_brief``
+    - All nine domain tools across the ``process_*``, ``exception_*``, and
+      ``decision_*`` tool suites.
+    - MCP Resources: ``workflow://process-maps/{process_name}``,
+      ``workflow://exceptions/active``,
+      ``workflow://metrics/kpi-definitions``, ``workflow://audit/recent``.
+    - MCP Prompts: ``process_bottleneck_review``,
+      ``exception_triage_session``, ``management_decision_brief``.
 
     Returns:
         Configured FastMCP server instance.
     """
     mcp = FastMCP(
         name="workflow-intelligence",
-        version="0.1.0",
+        version="0.5.0",
         instructions=(
             "Workflow Intelligence MCP server. Provides process discovery, "
             "workflow exception resolution, and business decision intelligence "
-            "tools backed by deterministic analytics."
+            "tools backed by deterministic analytics, plus MCP resources, "
+            "prompts, and observability."
         ),
         lifespan=_lifespan,
     )
@@ -93,7 +119,13 @@ def create_server() -> FastMCP:
     register_exception_tools(mcp, exception_service)
     register_decision_tools(mcp, decision_service)
 
-    logger.info("Registered 9 domain tools on FastMCP server 'workflow-intelligence'")
+    register_resources(mcp, process_service, DEFAULT_SOURCE_URI)
+    register_prompts(mcp)
+
+    logger.info(
+        "Registered 9 domain tools, 4 resources, and 3 prompts on "
+        "FastMCP server 'workflow-intelligence'"
+    )
     return mcp
 
 
