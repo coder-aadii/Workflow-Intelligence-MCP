@@ -45,6 +45,7 @@ packages = ["src/workflow_intelligence"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-ra"
+asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 88
