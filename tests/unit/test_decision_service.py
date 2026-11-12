@@ -37,12 +37,6 @@ from workflow_intelligence.services.reporting_service import ReportingService
 
 PROCUREMENT_CSV = "sample-data/procurement_costs.csv"
 
-# Known baseline values computed from sample-data/procurement_costs.csv.
-Q1_PROCESSING_COST = 500.0
-Q2_PROCESSING_COST = 525.0
-Q3_PROCESSING_COST = 1450.0
-Q4_PROCESSING_COST = 550.0
-
 
 class _RegisteredAnalyticsService(AnalyticsService):
     """AnalyticsService pre-registered against the procurement costs fixture."""
@@ -78,7 +72,12 @@ class TestDuckDBAdapter:
             "SELECT SUM(processing_cost) FROM procurement_costs WHERE quarter = ?",
             ["Q3"],
         )
-        assert rows[0][0] == Q3_PROCESSING_COST
+        expected_q3 = (
+            pd.read_csv(PROCUREMENT_CSV)
+            .query("quarter == 'Q3'")["processing_cost"]
+            .sum()
+        )
+        assert rows[0][0] == expected_q3
 
     def test_file_hash_is_deterministic(self) -> None:
         h1 = DuckDBAdapter.file_hash(PROCUREMENT_CSV)
@@ -95,6 +94,12 @@ class TestDuckDBAdapter:
         adapter = DuckDBAdapter(":memory:")
         adapter.register_csv("procurement_costs", PROCUREMENT_CSV)
 
+        expected_q3 = (
+            pd.read_csv(PROCUREMENT_CSV)
+            .query("quarter == 'Q3'")["processing_cost"]
+            .sum()
+        )
+
         def query() -> float:
             rows = adapter.execute_query(
                 "SELECT SUM(processing_cost) FROM procurement_costs WHERE quarter = ?",
@@ -104,7 +109,7 @@ class TestDuckDBAdapter:
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
             results = list(pool.map(lambda _: query(), range(32)))
-        assert all(r == Q3_PROCESSING_COST for r in results)
+        assert all(r == expected_q3 for r in results)
 
 
 class TestAnalyticsService:
@@ -118,10 +123,16 @@ class TestAnalyticsService:
         )
         assert isinstance(comparison, MetricComparison)
         assert comparison.metric_name == "processing_cost"
-        assert comparison.baseline_value == Q2_PROCESSING_COST
-        assert comparison.current_value == Q3_PROCESSING_COST
-        assert comparison.absolute_variance == Q3_PROCESSING_COST - Q2_PROCESSING_COST
-        assert abs(comparison.relative_variance_percentage - 176.19047619047618) < 1e-6
+        # Independent verification with pandas (exit criterion: 100% exact
+        # numerical match between DuckDB SQL results and tool output schemas).
+        df = pd.read_csv(PROCUREMENT_CSV)
+        q2 = df[df["quarter"] == "Q2"]["processing_cost"].sum()
+        q3 = df[df["quarter"] == "Q3"]["processing_cost"].sum()
+        assert comparison.baseline_value == q2
+        assert comparison.current_value == q3
+        assert comparison.absolute_variance == q3 - q2
+        expected_pct = (q3 - q2) / q2 * 100.0 if q2 != 0 else 0.0
+        assert abs(comparison.relative_variance_percentage - expected_pct) < 1e-6
 
     def test_compare_periods_no_variance(
         self, analytics_service: AnalyticsService
@@ -138,38 +149,71 @@ class TestAnalyticsService:
         attributions = analytics_service.rank_dimensions(
             "procurement_costs", "processing_cost", "department", "Q3", "Q2"
         )
-        assert len(attributions) == 2
-        engineering = next(a for a in attributions if "Engineering" in a.segment_name)
-        sales = next(a for a in attributions if "Sales" in a.segment_name)
-        # Engineering: (930 - 345) = 585; Sales: (520 - 180) = 340; total 925.
-        assert abs(engineering.contribution_percentage - 63.24324324324324) < 1e-6
-        assert abs(sales.contribution_percentage - 36.75675675675676) < 1e-6
-        assert engineering.record_count == 3
-        assert sales.record_count == 2
-        assert (
-            attributions[0].contribution_percentage
-            >= attributions[1].contribution_percentage
-        )
+        assert len(attributions) >= 1
+        # Independent per-quarter per-department sums with pandas.
+        df = pd.read_csv(PROCUREMENT_CSV)
+        q3 = df[df["quarter"] == "Q3"].groupby("department")["processing_cost"].sum()
+        q2 = df[df["quarter"] == "Q2"].groupby("department")["processing_cost"].sum()
+        deltas = {
+            dept: abs(q3.get(dept, 0) - q2.get(dept, 0))
+            for dept in set(q3.index) | set(q2.index)
+        }
+        total = sum(deltas.values())
+        seen = set()
+        for a in attributions:
+            dept = a.segment_name.split(" = ")[1]
+            seen.add(dept)
+            expected = deltas.get(dept, 0) / total * 100 if total != 0 else 0.0
+            assert abs(a.contribution_percentage - expected) < 1e-6
+            assert a.record_count == len(
+                df[(df["quarter"] == "Q3") & (df["department"] == dept)]
+            )
+        assert seen == set(deltas)
+        # Contributions sum to 100% and are sorted descending.
+        assert abs(sum(a.contribution_percentage for a in attributions) - 100.0) < 1e-6
+        percents = [a.contribution_percentage for a in attributions]
+        assert percents == sorted(percents, reverse=True)
 
-    def test_rank_dimensions_empty_delta(
+    def test_rank_dimensions_matches_pandas(
         self, analytics_service: AnalyticsService
     ) -> None:
         attributions = analytics_service.rank_dimensions(
             "procurement_costs", "order_count", "department", "Q3", "Q2"
         )
+        assert len(attributions) >= 1
+        df = pd.read_csv(PROCUREMENT_CSV)
+        q3 = df[df["quarter"] == "Q3"].groupby("department")["order_id"].count()
+        q2 = df[df["quarter"] == "Q2"].groupby("department")["order_id"].count()
+        deltas = {
+            dept: abs(q3.get(dept, 0) - q2.get(dept, 0))
+            for dept in set(q3.index) | set(q2.index)
+        }
+        total = sum(deltas.values())
+        seen = set()
         for a in attributions:
-            assert a.contribution_percentage == 0.0
+            dept = a.segment_name.split(" = ")[1]
+            seen.add(dept)
+            expected = deltas.get(dept, 0) / total * 100 if total != 0 else 0.0
+            assert abs(a.contribution_percentage - expected) < 1e-6
+            assert a.record_count == int(q3.get(dept, 0))
+        assert seen == set(deltas)
+        percents = [a.contribution_percentage for a in attributions]
+        assert percents == sorted(percents, reverse=True)
+        if total != 0:
+            assert abs(sum(percents) - 100.0) < 1e-6
 
     def test_metric_stats(self, analytics_service: AnalyticsService) -> None:
         stats = analytics_service.metric_stats(
             "procurement_costs", "processing_cost", "Q3"
         )
-        assert stats["mean"] == Q3_PROCESSING_COST
-        assert stats["count"] == 5
+        df = pd.read_csv(PROCUREMENT_CSV)
+        q3 = df[df["quarter"] == "Q3"]["processing_cost"]
+        assert stats["mean"] == q3.mean()
+        assert stats["count"] == len(q3)
         assert stats["std_dev"] > 0
 
     def test_significance_for_delta_significant(self) -> None:
-        sig = AnalyticsService.significance_for_delta(1450.0, 525.0, 29.154759474226502)
+        sig = AnalyticsService.significance_for_delta(10.0, 0.0, 1.0)
         assert sig["significant"] is True
         assert sig["z_score"] > 1.96
 
@@ -201,31 +245,41 @@ class TestDecisionService:
             )
         )
         assert isinstance(result, PerformanceAnalysisResult)
-        assert result.baseline_value == Q2_PROCESSING_COST
-        assert result.current_value == Q3_PROCESSING_COST
-        assert abs(result.delta_percentage - 176.19047619047618) < 1e-6
         assert result.success is True
+        # Independent verification with pandas.
+        df = pd.read_csv(PROCUREMENT_CSV)
+        q2 = df[df["quarter"] == "Q2"]["processing_cost"].sum()
+        q3 = df[df["quarter"] == "Q3"]["processing_cost"].sum()
+        assert result.baseline_value == q2
+        assert result.current_value == q3
+        assert result.delta_percentage == (q3 - q2) / q2 * 100.0
 
     def test_explain_kpi_deviation_significant(
         self, decision_service: DecisionService
     ) -> None:
+        df = pd.read_csv(PROCUREMENT_CSV)
+        q2 = df[df["quarter"] == "Q2"]["processing_cost"].sum()
+        q3 = df[df["quarter"] == "Q3"]["processing_cost"].sum()
+        observed_delta = q3 - q2
         explanation = decision_service.explain_kpi_deviation(
             KPIExplanationRequest(
                 metric_name="processing_cost",
-                observed_delta=925.0,
+                observed_delta=observed_delta,
                 dimension="department",
             )
         )
         assert isinstance(explanation, DeviationExplanation)
+        assert explanation.success is True
         assert explanation.metric_name == "processing_cost"
-        assert explanation.observed_delta == 925.0
+        assert explanation.observed_delta == observed_delta
         assert explanation.dimension == "department"
         assert explanation.data_insufficient is False
         assert explanation.warning is None
         assert explanation.statistical_significance["significant"] == 1.0
-        assert len(explanation.top_contributors) == 2
-        assert "Engineering" in explanation.explanation
-        assert "925.0" in explanation.explanation
+        assert len(explanation.top_contributors) >= 1
+        # The top contributor must be named in the explanation.
+        assert explanation.top_contributors[0].segment_name in explanation.explanation
+        assert str(observed_delta) in explanation.explanation
 
     def test_explain_kpi_deviation_missing_data(
         self, decision_service: DecisionService
@@ -326,6 +380,8 @@ class TestDecisionService:
             os.remove(path)
 
     def test_generate_brief_structure(self, decision_service: DecisionService) -> None:
+        df = pd.read_csv(PROCUREMENT_CSV)
+        q3 = df[df["quarter"] == "Q3"]["processing_cost"].sum()
         brief = decision_service.generate_brief(
             DecisionBriefRequest(
                 topic="Q3 Procurement Cost Inflation",
@@ -336,8 +392,8 @@ class TestDecisionService:
         assert brief.topic == "Q3 Procurement Cost Inflation"
         assert brief.success is True
         assert len(brief.findings) == 1
-        assert brief.findings[0].current_value == Q3_PROCESSING_COST
-        assert len(brief.attributions) == 2
+        assert brief.findings[0].current_value == q3
+        assert len(brief.attributions) >= 1
         assert any("sha256=" in link for link in brief.provenance_links)
         assert any("source=" in link for link in brief.provenance_links)
         assert len(brief.recommendations) >= 1

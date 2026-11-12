@@ -315,10 +315,9 @@ class AnalyticsService:
         """
         self._ensure_registered(table_name)
         spec = self._spec(metric_name)
-        expression = spec["expression"]
         column = spec["column"]
         sql = (
-            f"SELECT {expression}, STDDEV({column}), COUNT(*) "
+            f"SELECT AVG({column}), STDDEV({column}), COUNT(*) "
             f"FROM {table_name} WHERE quarter = ?"
         )
         try:

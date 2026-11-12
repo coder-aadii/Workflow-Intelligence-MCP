@@ -1,0 +1,38 @@
+[
+  {
+    "case_id": "PO-9001",
+    "workflow_type": "purchase_order_creation",
+    "failure_category": "MASTER_DATA_DISCREPANCY",
+    "submitted_vendor": "ABC Technologies",
+    "registered_vendor": "ABC Technology Pvt Ltd",
+    "submitted_tax_id": "TX-123456",
+    "registered_tax_id": "TX-123456",
+    "discrepancy": "vendor_name_typo",
+    "description": "Submitted as 'ABC Technologies', registered in master DB as 'ABC Technology Pvt Ltd'. Tax ID matches exactly."
+  },
+  {
+    "case_id": "PO-9002",
+    "workflow_type": "purchase_order_creation",
+    "failure_category": "GOVERNANCE_INCOMPLETE",
+    "submitted_vendor": "Omega Supplies Inc",
+    "registered_vendor": "Omega Supplies Inc",
+    "submitted_tax_id": "TX-777888",
+    "registered_tax_id": "TX-777888",
+    "department_cost_center": null,
+    "discrepancy": "missing_department_cost_center",
+    "description": "Missing department cost-center code on the purchase requisition; governance record incomplete."
+  },
+  {
+    "case_id": "PO-9003",
+    "workflow_type": "purchase_order_creation",
+    "failure_category": "APPROVAL_TIMEOUT",
+    "submitted_vendor": "Delta Logistics Ltd",
+    "registered_vendor": "Delta Logistics Ltd",
+    "submitted_tax_id": "TX-999000",
+    "registered_tax_id": "TX-999000",
+    "manager_sign_off_days": 7,
+    "approval_sla_business_days": 5,
+    "discrepancy": "approval_timeout",
+    "description": "Manager sign-off took 7 business days, exceeding the 5-business-day SLA; approval timeout on manager sign-off."
+  }
+]
