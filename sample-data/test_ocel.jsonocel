@@ -1,0 +1,73 @@
+{
+  "ocel:global-event": {
+    "ocel:activity": "__INVALID__"
+  },
+  "ocel:global-object": {
+    "ocel:type": "__INVALID__"
+  },
+  "ocel:global-log": {
+    "ocel:object-types": [
+      "order"
+    ],
+    "ocel:attribute-names": [],
+    "ocel:version": "1.0",
+    "ocel:ordering": "timestamp"
+  },
+  "ocel:events": {
+    "e1": {
+      "ocel:activity": "Receive Order",
+      "ocel:timestamp": "2026-01-01T08:00:00",
+      "ocel:type": "order",
+      "ocel:vmap": {},
+      "ocel:omap": [
+        "order1"
+      ]
+    },
+    "e2": {
+      "ocel:activity": "Process Payment",
+      "ocel:timestamp": "2026-01-01T09:00:00",
+      "ocel:type": "order",
+      "ocel:vmap": {},
+      "ocel:omap": [
+        "order1"
+      ]
+    },
+    "e3": {
+      "ocel:activity": "Ship Order",
+      "ocel:timestamp": "2026-01-02T10:00:00",
+      "ocel:type": "order",
+      "ocel:vmap": {},
+      "ocel:omap": [
+        "order1"
+      ]
+    },
+    "e4": {
+      "ocel:activity": "Receive Order",
+      "ocel:timestamp": "2026-01-03T08:00:00",
+      "ocel:type": "order",
+      "ocel:vmap": {},
+      "ocel:omap": [
+        "order2"
+      ]
+    },
+    "e5": {
+      "ocel:activity": "Process Payment",
+      "ocel:timestamp": "2026-01-03T09:00:00",
+      "ocel:type": "order",
+      "ocel:vmap": {},
+      "ocel:omap": [
+        "order2"
+      ]
+    }
+  },
+  "ocel:objects": {
+    "order1": {
+      "ocel:type": "order",
+      "ocel:ovmap": {}
+    },
+    "order2": {
+      "ocel:type": "order",
+      "ocel:ovmap": {}
+    }
+  }
+}

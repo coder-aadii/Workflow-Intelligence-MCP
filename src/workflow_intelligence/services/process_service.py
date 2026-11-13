@@ -37,7 +37,9 @@ def _detect_columns(columns: list[str]) -> tuple[str, str, str]:
     """Heuristically detect case/activity/timestamp columns from a header list.
 
     Matches columns case-insensitively against common names, falling back to
-    positional columns when no match is found.
+    positional columns when no match is found. Also recognizes OCEL
+    extended-table column names (``ocel:activity``, ``ocel:timestamp``,
+    ``ocel:type:*``).
 
     Args:
         columns: List of column names from the event log header.
@@ -64,13 +66,28 @@ def _detect_columns(columns: list[str]) -> tuple[str, str, str]:
                 return lower[cand]
         return None
 
-    case_id_col = _first_match(case_candidates) or columns[0]
-    activity_col = _first_match(activity_candidates) or (
-        columns[1] if len(columns) > 1 else columns[0]
-    )
-    timestamp_col = _first_match(timestamp_candidates) or (
-        columns[2] if len(columns) > 2 else columns[-1]
-    )
+    # Case ID: prefer explicit case columns, then OCEL object columns
+    # (ocel:type:*), then fall back to the first column.
+    case_id_col = _first_match(case_candidates)
+    if case_id_col is None:
+        ocel_case_cols = sorted(
+            c for c in columns if c.lower().startswith("ocel:type:")
+        )
+        case_id_col = ocel_case_cols[0] if ocel_case_cols else columns[0]
+
+    # Activity: prefer explicit activity columns, then ocel:activity.
+    activity_col = _first_match(activity_candidates)
+    if activity_col is None:
+        activity_col = (
+            lower["ocel:activity"] if "ocel:activity" in lower else None
+        ) or (columns[1] if len(columns) > 1 else columns[0])
+
+    # Timestamp: prefer explicit timestamp columns, then ocel:timestamp.
+    timestamp_col = _first_match(timestamp_candidates)
+    if timestamp_col is None:
+        timestamp_col = (
+            lower["ocel:timestamp"] if "ocel:timestamp" in lower else None
+        ) or (columns[2] if len(columns) > 2 else columns[-1])
 
     return case_id_col, activity_col, timestamp_col
 
