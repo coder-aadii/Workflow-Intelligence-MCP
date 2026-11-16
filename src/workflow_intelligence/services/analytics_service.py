@@ -547,7 +547,7 @@ class AnalyticsService:
             "ORDER BY ordinal_position"
         )
         try:
-            rows = self._adapter.execute_query(sql, time_limit_ms=5000)
+            rows = self._adapter.execute_query(sql)
         except DuckDBAdapterError:
             rows = []
         for (col_name,) in rows:

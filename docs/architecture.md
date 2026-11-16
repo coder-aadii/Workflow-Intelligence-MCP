@@ -1,6 +1,6 @@
 # Workflow Intelligence MCP — Architecture
 
-> **Version:** v1.0.0  
+> **Version:** v1.0.1  
 > **Milestone:** Production-Ready Release  
 
 ## 1. Overview
@@ -144,7 +144,7 @@ workflow-intelligence-mcp/
 ├── docs/                           # architecture.md, tool-reference.md, security.md
 ├── scripts/                        # generate_sample_data.py, verify_mcp_local.py
 ├── src/workflow_intelligence/
-│   ├── __init__.py                 # package version (0.5.0)
+│   ├── __init__.py                 # package version (1.0.1)
 │   ├── server.py                   # FastMCP assembly, lifespan, CLI
 │   ├── config.py                   # Pydantic BaseSettings
 │   ├── tools/                      # Thin MCP tool endpoints (process, exception, decision)
@@ -162,5 +162,5 @@ workflow-intelligence-mcp/
 
 ## 11. Release
 
-The v1.0.0 release is tagged `v1.0.0`. See `CHANGELOG` / git history for
-per-milestone commits (v0.1.0 Phase 4, v0.5.0 Phases 5–7, v1.0.0 Phase 8).
+The v1.0.1 release is tagged `v1.0.1`. See `CHANGELOG` / git history for
+per-milestone commits (v0.1.0 Phase 4, v0.5.0 Phases 5–7, v1.0.0 Phase 8, v1.0.1 Hardened Release).

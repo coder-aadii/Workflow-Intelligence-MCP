@@ -518,3 +518,93 @@ class TestAnalysisExecutionTimeout:
             with pytest.raises(ProcessServiceError) as exc_info:
                 service.analyze_business_process(req)
             assert "timed out after" in str(exc_info.value)
+
+
+class TestPlaceholderCredentialRejection:
+    """Tests verifying template placeholders cannot be used as production credentials."""
+
+    @pytest.mark.parametrize(
+        "placeholder_token",
+        [
+            "replace_with_strong_random_token_minimum_32_chars",
+            "changeme_token_12345",
+            "placeholder_auth_token",
+            "your_token_here_1234",
+            "short",
+        ],
+    )
+    def test_production_network_startup_fails_with_placeholder_token(
+        self, placeholder_token: str
+    ) -> None:
+        """In production, unchanged template tokens are rejected at startup."""
+        prod_settings = Settings(
+            workflow_env="production",
+            mcp_auth_token=placeholder_token,
+            database_url="postgresql+asyncpg://app_user:strong_prod_pass_987@localhost:5432/workflow_intelligence",
+        )
+        with patch("workflow_intelligence.server.get_settings", return_value=prod_settings):
+            with patch("sys.argv", ["server", "--transport", "streamable-http"]):
+                with pytest.raises(RuntimeError) as exc_info:
+                    main()
+                assert "MCP_AUTH_TOKEN" in str(exc_info.value)
+
+    @pytest.mark.parametrize(
+        "placeholder_pw",
+        [
+            "replace_with_secure_production_password_minimum_16_chars",
+            "changeme",
+            "postgres",
+            "password",
+            "admin",
+            "root",
+            "short",
+        ],
+    )
+    def test_production_startup_fails_with_placeholder_postgres_password(
+        self, placeholder_pw: str
+    ) -> None:
+        """In production, default or template postgres passwords are rejected at startup."""
+        prod_settings = Settings(
+            workflow_env="production",
+            mcp_auth_token="strong_production_token_minimum_32_chars_ok",
+            postgres_password=placeholder_pw,
+            database_url=f"postgresql+asyncpg://app_user:{placeholder_pw}@localhost:5432/workflow_intelligence",
+        )
+        with patch("workflow_intelligence.server.get_settings", return_value=prod_settings):
+            with patch("sys.argv", ["server", "--transport", "stdio"]):
+                with pytest.raises(RuntimeError) as exc_info:
+                    main()
+                assert "database credentials" in str(exc_info.value) or "POSTGRES_PASSWORD" in str(exc_info.value)
+
+
+class TestDuckDBQueryTimeoutAndCancellation:
+    """Tests verifying DuckDB query timeout and cancellation via QUERY_TIMEOUT_MS."""
+
+    def test_duckdb_adapter_wires_query_timeout_ms_from_settings(self) -> None:
+        """DuckDBAdapter initializes query_timeout_ms from settings by default."""
+        custom_settings = Settings(query_timeout_ms=12345)
+        with patch("workflow_intelligence.config.get_settings", return_value=custom_settings):
+            from workflow_intelligence.adapters.analytics.duckdb_adapter import DuckDBAdapter
+
+            adapter = DuckDBAdapter(":memory:")
+            assert adapter._query_timeout_ms == 12345
+
+    def test_duckdb_query_timeout_interrupts_execution_and_recovers(self) -> None:
+        """Long-running queries are interrupted when exceeding timeout, and connection recovers."""
+        from workflow_intelligence.adapters.analytics.duckdb_adapter import (
+            DuckDBAdapter,
+            DuckDBAdapterTimeoutError,
+        )
+
+        adapter = DuckDBAdapter(":memory:", query_timeout_ms=50)
+
+        # Heavy recursive Cartesian query
+        heavy_sql = "WITH RECURSIVE t(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM t) SELECT count(*) FROM t, t AS t2"
+        with pytest.raises(DuckDBAdapterTimeoutError) as exc_info:
+            adapter.execute_query(heavy_sql, time_limit_ms=50)
+
+        assert "exceeded execution time limit" in str(exc_info.value)
+
+        # Verify that subsequent query executes cleanly without deadlock or connection corruption
+        res = adapter.execute_query("SELECT 42")
+        assert res == [(42,)]

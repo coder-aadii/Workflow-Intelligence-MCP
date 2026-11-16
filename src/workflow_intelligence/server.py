@@ -22,7 +22,11 @@ from starlette.responses import JSONResponse
 
 from workflow_intelligence import __version__
 from workflow_intelligence.config import get_settings
-from workflow_intelligence.security.auth import StaticTokenVerifier
+from workflow_intelligence.security.auth import (
+    StaticTokenVerifier,
+    validate_production_auth_token,
+    validate_production_database_credentials,
+)
 from workflow_intelligence.observability.logging import (
     configure_logging,
     get_logger,
@@ -122,6 +126,10 @@ def create_server() -> FastMCP:
         Configured FastMCP server instance.
     """
     settings = get_settings()
+    configure_logging(
+        workflow_env=settings.workflow_env,
+        log_level=settings.log_level,
+    )
 
     auth_verifier = None
     if settings.mcp_auth_token:
@@ -282,35 +290,19 @@ def main() -> None:
     args = parser.parse_args()
     settings = get_settings()
 
+    # Always ensure structured logging is configured to stream to sys.stderr,
+    # preventing stdout corruption for STDIO JSON-RPC clients.
+    configure_logging(workflow_env=settings.workflow_env, log_level=settings.log_level)
+
     # In production, enforce strict security safeguards on credentials and authentication
     if settings.workflow_env == "production":
-        lowered_db_url = settings.database_url.lower()
-        if (
-            ":postgres@" in lowered_db_url
-            or ":password@" in lowered_db_url
-            or ":admin@" in lowered_db_url
-            or ":root@" in lowered_db_url
-        ):
-            logger.critical(
-                "Production startup failed: default or trivial database credentials ('postgres:postgres') "
-                "are forbidden in production. Configure a secure POSTGRES_PASSWORD and DATABASE_URL."
-            )
-            raise RuntimeError(
-                "Production startup failed: default or trivial database credentials ('postgres:postgres') "
-                "are forbidden in production. Configure a secure POSTGRES_PASSWORD and DATABASE_URL."
-            )
+        validate_production_database_credentials(
+            database_url=str(settings.database_url),
+            postgres_password=settings.postgres_password,
+        )
 
         if args.transport != "stdio":
-            token = (settings.mcp_auth_token or "").strip()
-            if not token:
-                logger.critical(
-                    "Production network startup aborted: MCP_AUTH_TOKEN is required for network exposure. "
-                    "A gateway flag alone cannot be treated as proof of authentication; network endpoints fail closed."
-                )
-                raise RuntimeError(
-                    "Production network startup aborted: MCP_AUTH_TOKEN is required for network exposure. "
-                    "A gateway flag alone cannot be treated as proof of authentication; network endpoints fail closed."
-                )
+            validate_production_auth_token(settings.mcp_auth_token)
 
     mcp = create_server()
 

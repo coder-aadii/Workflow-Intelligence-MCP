@@ -69,6 +69,53 @@ async def test_stdio_transport(server) -> bool:
     return True
 
 
+async def test_stdio_subprocess() -> bool:
+    print("\nTesting STDIO transport (real OS subprocess client)...")
+    import os
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "workflow_intelligence.server", "--transport", "stdio"],
+        env={**os.environ, "WORKFLOW_ENV": "development"},
+    )
+    async with stdio_client(params) as (read, write):
+        async with ClientSession(read, write) as session:
+            init_res = await session.initialize()
+            assert init_res.server_info.name == "workflow-intelligence"
+            print(
+                f"  [PASS] STDIO Subprocess initialized: {init_res.server_info.name} "
+                f"v{init_res.server_info.version}"
+            )
+
+            tools_res = await session.list_tools()
+            assert len(tools_res.tools) == 9, f"Expected 9 tools, got {len(tools_res.tools)}"
+            print(f"  [PASS] STDIO Subprocess tools/list: {len(tools_res.tools)} tools registered")
+
+            call_res = await session.call_tool(
+                "decision_analyze_kpi_performance",
+                {
+                    "metric_name": "processing_cost",
+                    "source_uri": "sample-data/procurement_costs.csv",
+                    "timeframe_column": "quarter",
+                    "timeframe_current": "Q3",
+                    "timeframe_baseline": "Q2",
+                },
+            )
+            assert not call_res.is_error
+            print("  [PASS] STDIO Subprocess tools/call: decision_analyze_kpi_performance executed successfully")
+
+            resources_res = await session.list_resources()
+            prompts_res = await session.list_prompts()
+            print(
+                f"  [PASS] STDIO Subprocess resources/list ({len(resources_res.resources)}) "
+                f"& prompts/list ({len(prompts_res.prompts)}) verified"
+            )
+
+    return True
+
+
 def test_http_transports(server, token: str = "test-token-phase5") -> bool:
     print("\nTesting Streamable HTTP and SSE transports with authentication...")
     app = create_unified_http_app(server)
@@ -180,10 +227,13 @@ async def main_verifier():
     # Inject token verifier for testing auth
     mcp_server.auth = StaticTokenVerifier(token)
 
-    # 1. STDIO
+    # 1. STDIO (In-Memory FastMCP Client)
     await test_stdio_transport(mcp_server)
 
-    # 2. Streamable HTTP & SSE
+    # 2. STDIO (Real OS Subprocess Client)
+    await test_stdio_subprocess()
+
+    # 3. Streamable HTTP & SSE
     test_http_transports(mcp_server, token=token)
 
     print("\n============================================================")

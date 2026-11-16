@@ -1,6 +1,6 @@
 # Workflow Intelligence MCP — Security & Hardening Reference
 
-> **Version:** v1.1.0-hardened (Production Ready)  
+> **Version:** v1.0.1 (Hardened Release)  
 > **Target Framework:** FastMCP & MCP Protocol Specification
 
 ---
@@ -20,9 +20,8 @@ The server operates as an **intelligence and reasoning layer** alongside workflo
 - **STDIO Transport**: Executes in the client's local execution boundary (e.g. Claude Desktop, Cursor). The trust boundary is enforced by OS-level file permissions and user sandboxing.
 - **Network Transports (Streamable HTTP `/mcp` & Legacy SSE `/sse`)**:
   - Protected by `StaticTokenVerifier` implementing timing-attack-safe token comparison using Python's `hmac.compare_digest`.
-  - In production (`WORKFLOW_ENV=production`), server startup **strictly fails** if network endpoints are exposed without either:
-    1. A valid, non-empty `MCP_AUTH_TOKEN`, or
-    2. An explicitly validated trusted reverse-proxy attestation (`TRUSTED_AUTH_GATEWAY=true`).
+  - In production (`WORKFLOW_ENV=production`), server startup **strictly fails** if network endpoints are exposed without a valid, non-empty, non-placeholder `MCP_AUTH_TOKEN`. A gateway flag alone (`TRUSTED_AUTH_GATEWAY=true`) cannot bypass authentication without an active token; network endpoints fail closed.
+  - Template placeholder tokens (e.g. `replace_with_*`, `changeme`, `placeholder`) and insecure/default passwords are systematically rejected at startup in production mode.
   - Requests with missing, malformed, or invalid tokens are immediately rejected with HTTP `401 Unauthorized`.
 
 ---

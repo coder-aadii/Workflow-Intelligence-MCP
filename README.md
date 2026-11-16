@@ -394,7 +394,7 @@ In Cursor's `Features > MCP Servers` settings:
 | `SERVER_HOST` | Host address for network transports | `127.0.0.1` |
 | `SERVER_PORT` | Port for HTTP transports | `8000` |
 | `MCP_AUTH_TOKEN` | Bearer token for network endpoints (mandatory in production) | `None` |
-| `TRUSTED_AUTH_GATEWAY` | Set `true` if behind an authenticating reverse proxy/ingress | `false` |
+| `TRUSTED_AUTH_GATEWAY` | Gateway indicator; in production, `MCP_AUTH_TOKEN` is strictly mandatory and cannot be bypassed | `false` |
 | `ALLOWED_DATA_DIRS` | Comma-separated allowlist of accessible data directories | `sample-data,data,local` |
 | `MAX_FILE_SIZE_BYTES` | Maximum allowable file size before ingestion rejection | `209715200` (200MB) |
 | `ANALYSIS_TIMEOUT_SECONDS` | Timeout for process mining with process-isolated termination | `60.0` |

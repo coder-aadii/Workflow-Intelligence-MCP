@@ -29,6 +29,7 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://postgres:postgres@localhost:5432/workflow_intelligence",
         alias="DATABASE_URL",
     )
+    postgres_password: str | None = Field(default=None, alias="POSTGRES_PASSWORD")
     duckdb_path: str = Field(default=":memory:", alias="DUCKDB_PATH")
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")

@@ -1,7 +1,7 @@
 # Workflow Intelligence MCP — Tool Reference
 
-> **Version:** v1.0.0  
-> **Protocol:** Model Context Protocol (MCP) over STDIO / SSE  
+> **Version:** v1.0.1  
+> **Protocol:** Model Context Protocol (MCP) over STDIO / Streamable HTTP / SSE  
 > **Total tools:** 9 across 3 suites  
 
 All tool inputs are strictly validated with Pydantic V2. All calculations are

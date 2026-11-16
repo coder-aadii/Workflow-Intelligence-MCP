@@ -30,6 +30,10 @@ class DuckDBAdapterError(Exception):
     """Raised when DuckDB adapter operations fail."""
 
 
+class DuckDBAdapterTimeoutError(DuckDBAdapterError):
+    """Raised when a DuckDB query exceeds the configured execution time limit."""
+
+
 class DuckDBAdapter:
     """Thread-safe DuckDB connection manager.
 
@@ -41,15 +45,30 @@ class DuckDBAdapter:
     Attributes:
         database: DuckDB database path or ``":memory:"`` for in-memory.
         read_only: Open databases in read-only mode.
+        query_timeout_ms: Default query execution timeout in milliseconds.
     """
 
-    def __init__(self, database: str = ":memory:", read_only: bool = False) -> None:
+    def __init__(
+        self,
+        database: str = ":memory:",
+        read_only: bool = False,
+        query_timeout_ms: int | None = None,
+    ) -> None:
         self._database = database
         self._read_only = read_only
         self._lock = threading.Lock()
         self._local = threading.local()
         # table_name -> (kind, path) for views replicated to every connection.
         self._registered_views: dict[str, tuple[str, str]] = {}
+        if query_timeout_ms is not None:
+            self._query_timeout_ms = query_timeout_ms
+        else:
+            try:
+                from workflow_intelligence.config import get_settings
+
+                self._query_timeout_ms = get_settings().query_timeout_ms
+            except Exception:
+                self._query_timeout_ms = 30000
 
     @property
     def connection(self) -> duckdb.DuckDBPyConnection:
@@ -87,30 +106,33 @@ class DuckDBAdapter:
             self._local.connection = None
 
     @contextmanager
-    def _timed_session(self, time_limit_ms: int) -> Iterator[duckdb.DuckDBPyConnection]:
-        """Yield the connection with an attempted statement time limit.
-
-        DuckDB does not expose ``statement_timeout`` as a SET variable in all
-        builds, so the limit is applied on a best-effort basis. The parameter
-        remains part of the API contract so callers can rely on it being
-        honored where the engine supports it.
-        """
+    def _timed_session(
+        self, time_limit_ms: int | None = None
+    ) -> Iterator[duckdb.DuckDBPyConnection]:
+        """Yield the connection with reliable query cancellation via interrupt."""
         conn = self.connection
-        if time_limit_ms and time_limit_ms > 0:
-            try:  # best-effort; ignored when unsupported by the engine build
-                conn.execute(f"SET statement_timeout={int(time_limit_ms)}")
-            except Exception:  # noqa: BLE001 - time limit is advisory
-                pass
+        limit_ms = self._query_timeout_ms if time_limit_ms is None else time_limit_ms
+        timeout_sec = (limit_ms / 1000.0) if (limit_ms and limit_ms > 0) else None
+        timer: threading.Timer | None = None
+        if timeout_sec is not None:
+            timer = threading.Timer(timeout_sec, conn.interrupt)
+            timer.daemon = True
+            timer.start()
         try:
             yield conn
+        except duckdb.InterruptException as exc:
+            raise DuckDBAdapterTimeoutError(
+                f"DuckDB query exceeded execution time limit of {limit_ms}ms"
+            ) from exc
         finally:
-            pass
+            if timer is not None:
+                timer.cancel()
 
     def execute_query(
         self,
         sql: str,
         parameters: list[Any] | tuple[Any, ...] | dict[str, Any] | None = None,
-        time_limit_ms: int = 5000,
+        time_limit_ms: int | None = None,
     ) -> list[tuple[Any, ...]]:
         """Execute a parameterized query and return all result rows.
 
@@ -119,12 +141,14 @@ class DuckDBAdapter:
                 placeholders. Identifiers are never interpolated from user
                 input.
             parameters: Query parameters bound through DuckDB's parameter API.
-            time_limit_ms: Maximum statement execution time in milliseconds.
+            time_limit_ms: Maximum statement execution time in milliseconds
+                (defaults to configured QUERY_TIMEOUT_MS).
 
         Returns:
             List of result rows, each row as a tuple of column values.
 
         Raises:
+            DuckDBAdapterTimeoutError: If execution exceeds the time limit.
             DuckDBAdapterError: If the query cannot be executed.
         """
         try:
@@ -134,6 +158,8 @@ class DuckDBAdapter:
                 else:
                     cursor = conn.execute(sql, parameters)
                 return cursor.fetchall()
+        except DuckDBAdapterTimeoutError:
+            raise
         except Exception as exc:  # noqa: BLE001 - wrap adapter errors
             raise DuckDBAdapterError("DuckDB query failed: " + str(exc)) from exc
 
@@ -141,7 +167,7 @@ class DuckDBAdapter:
         self,
         sql: str,
         parameters: list[Any] | tuple[Any, ...] | dict[str, Any] | None = None,
-        time_limit_ms: int = 5000,
+        time_limit_ms: int | None = None,
     ) -> Any:
         """Execute a parameterized query returning a pandas DataFrame."""
 
@@ -150,6 +176,8 @@ class DuckDBAdapter:
                 if parameters is None:
                     return conn.execute(sql).df()
                 return conn.execute(sql, parameters).df()
+        except DuckDBAdapterTimeoutError:
+            raise
         except Exception as exc:  # noqa: BLE001 - wrap adapter errors
             raise DuckDBAdapterError("DuckDB query failed: " + str(exc)) from exc
 
