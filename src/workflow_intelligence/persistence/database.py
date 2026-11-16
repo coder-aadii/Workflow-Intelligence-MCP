@@ -43,6 +43,25 @@ class Base(DeclarativeBase):
 # is requested.
 _engine: Any = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
+_db_initialized: bool = False
+
+
+def is_db_initialized() -> bool:
+    """Return whether the database has been successfully initialized in this process."""
+    return _db_initialized
+
+
+async def check_db_health(database_url: str | None = None) -> bool:
+    """Execute a simple query to verify database connectivity."""
+    try:
+        from sqlalchemy import text
+
+        engine = get_engine(database_url)
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
 
 
 def _build_engine(database_url: str | None = None) -> Any:
@@ -81,7 +100,7 @@ def get_engine(database_url: str | None = None) -> Any:
 
 def reset_engine(database_url: str | None = None) -> None:
     """Dispose and recreate the engine (useful in test teardown)."""
-    global _engine, _session_factory
+    global _engine, _session_factory, _db_initialized
     if _engine is not None:
         try:  # best effort; never block engine recreation on disposal
             _engine.sync_engine.dispose()
@@ -89,6 +108,7 @@ def reset_engine(database_url: str | None = None) -> None:
             pass
     _engine = None
     _session_factory = None
+    _db_initialized = False
     _engine = _build_engine(database_url)
 
 
@@ -118,9 +138,11 @@ async def init_db(database_url: str | None = None) -> None:
 
     Intended for application startup and test database bootstrapping.
     """
+    global _db_initialized
     engine = get_engine(database_url)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    _db_initialized = True
 
 
 async def drop_all(database_url: str | None = None) -> None:

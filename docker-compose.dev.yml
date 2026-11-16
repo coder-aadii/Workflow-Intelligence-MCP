@@ -15,10 +15,14 @@ services:
     environment:
       - WORKFLOW_ENV=development
       - LOG_LEVEL=DEBUG
+      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-dev_mcp_secret_token_12345}
+      - DATABASE_URL=postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-dev_postgres_password}@postgres:5432/${POSTGRES_DB:-workflow_intelligence}
     volumes:
       - ./src/workflow_intelligence:/app/src/workflow_intelligence:ro
 
   postgres:
+    environment:
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-dev_postgres_password}
     ports:
       - "127.0.0.1:5432:5432"
 

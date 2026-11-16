@@ -98,14 +98,19 @@ def _detect_columns(columns: list[str]) -> tuple[str, str, str]:
 
 
 def _isolated_analysis_worker(
-    queue: Any, fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+    conn: Any, fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> None:
-    """Worker function executed in an isolated child process."""
+    """Worker function executed in an isolated child process via OS Pipe."""
     try:
         res = fn(*args, **kwargs)
-        queue.put(("success", res))
+        conn.send(("success", res))
     except Exception as exc:
-        queue.put(("error", exc))
+        conn.send(("error", exc))
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 class ProcessService:
@@ -121,7 +126,9 @@ class ProcessService:
     ) -> Any:
         """Execute an analysis function with OS-level process isolation and timeout guardrail.
 
-        Terminates the worker process immediately upon timeout to prevent unbounded CPU/memory consumption.
+        Uses an OS-level Pipe (free of background feeder thread deadlocks) and terminates
+        the worker process immediately upon timeout to prevent unbounded CPU/memory consumption.
+        Never falls back to unkillable threads.
         """
         settings = get_settings()
         timeout = settings.analysis_timeout_seconds
@@ -130,47 +137,71 @@ class ProcessService:
 
         import multiprocessing as mp
 
+        ctx = mp.get_context("spawn")
+        parent_conn, child_conn = ctx.Pipe(duplex=False)
+        p = ctx.Process(
+            target=_isolated_analysis_worker,
+            args=(child_conn, fn, args, kwargs),
+        )
+
         try:
-            ctx = mp.get_context("spawn")
-            q = ctx.Queue()
-            p = ctx.Process(
-                target=_isolated_analysis_worker,
-                args=(q, fn, args, kwargs),
-            )
             p.start()
-            p.join(timeout=timeout)
-            if p.is_alive():
-                p.terminate()
-                p.join(timeout=0.5)
+            # Close child connection in parent process so that EOF is raised if child dies
+            try:
+                child_conn.close()
+            except Exception:
+                pass
+
+            # Wait for data on pipe with strict timeout
+            has_data = parent_conn.poll(timeout=timeout)
+            if not has_data:
+                # Terminate child process immediately to release CPU and memory
                 if p.is_alive():
-                    p.kill()
-                    p.join(timeout=0.2)
+                    p.terminate()
+                    p.join(timeout=0.5)
+                    if p.is_alive():
+                        p.kill()
+                        p.join(timeout=0.2)
                 raise ProcessServiceError(
                     f"Process mining analysis timed out after {timeout} seconds. "
                     "Worker process was terminated to prevent memory or CPU exhaustion."
                 )
 
-            if q.empty():
+            # Receive result from worker
+            try:
+                status, payload = parent_conn.recv()
+            except EOFError as exc:
                 raise ProcessServiceError(
-                    "Process mining worker exited abnormally without returning a result."
-                )
+                    "Process mining worker terminated unexpectedly without returning a result."
+                ) from exc
 
-            status, payload = q.get(timeout=1.0)
+            p.join(timeout=1.0)
             if status == "error":
                 raise payload
             return payload
-        except ProcessServiceError:
-            raise
-        except Exception:
-            # Fallback to ThreadPoolExecutor if OS forbids forking
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(fn, *args, **kwargs)
+        finally:
+            # Absolute guarantee: no child process is left running or orphaned
+            try:
+                parent_conn.close()
+            except Exception:
+                pass
+            try:
+                child_conn.close()
+            except Exception:
+                pass
+            if p.is_alive():
                 try:
-                    return future.result(timeout=timeout)
-                except concurrent.futures.TimeoutError as exc:
-                    raise ProcessServiceError(
-                        f"Process mining analysis timed out after {timeout} seconds."
-                    ) from exc
+                    p.terminate()
+                    p.join(timeout=0.5)
+                    if p.is_alive():
+                        p.kill()
+                        p.join(timeout=0.2)
+                except Exception:
+                    pass
+            try:
+                p.close()
+            except Exception:
+                pass
 
     def analyze_business_process(
         self, request: ProcessAnalyzeRequest

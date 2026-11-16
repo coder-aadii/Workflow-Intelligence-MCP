@@ -20,6 +20,7 @@ from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from workflow_intelligence import __version__
 from workflow_intelligence.config import get_settings
 from workflow_intelligence.security.auth import StaticTokenVerifier
 from workflow_intelligence.observability.logging import (
@@ -82,7 +83,12 @@ async def _lifespan(server: FastMCP) -> AsyncGenerator[None, None]:
 
         await init_db()
         logger.info("Database persistence initialized successfully.")
-    except Exception as exc:  # noqa: BLE001 - startup must not hard-fail
+    except Exception as exc:  # noqa: BLE001
+        if settings.workflow_env == "production":
+            logger.critical("Production database initialization failed: %s", exc)
+            raise RuntimeError(
+                f"Production database initialization failed: {exc}"
+            ) from exc
         logger.warning(
             "Database persistence unavailable; running in non-persistent demo mode: %s",
             exc,
@@ -129,7 +135,7 @@ def create_server() -> FastMCP:
 
     mcp = FastMCP(
         name="workflow-intelligence",
-        version="0.5.0",
+        version=__version__,
         instructions=(
             "Workflow Intelligence MCP server. Provides process discovery, "
             "workflow exception resolution, and business decision intelligence "
@@ -161,17 +167,49 @@ def create_server() -> FastMCP:
             {
                 "status": "healthy",
                 "service": "workflow-intelligence",
-                "version": "1.0.1",
+                "version": __version__,
             }
         )
 
     @mcp.custom_route("/ready", methods=["GET"])
     async def _readiness_check(request: Request) -> JSONResponse:
-        """Readiness probe verifying services and MCP registries are initialized."""
+        """Readiness probe verifying services, database, and MCP registries are initialized."""
+        from workflow_intelligence.persistence.database import (
+            check_db_health,
+            is_db_initialized,
+        )
+
+        db_healthy = await check_db_health()
+        db_initialized = is_db_initialized()
+
+        # In production, failed database initialization or broken connectivity must fail readiness
+        if settings.workflow_env == "production" and (
+            not db_initialized or not db_healthy
+        ):
+            return JSONResponse(
+                {
+                    "status": "not_ready",
+                    "service": "workflow-intelligence",
+                    "error": (
+                        "Database not initialized"
+                        if not db_initialized
+                        else "Database connectivity check failed"
+                    ),
+                    "database_initialized": db_initialized,
+                    "database_healthy": db_healthy,
+                    "tools_count": 9,
+                    "resources_count": 4,
+                    "prompts_count": 3,
+                },
+                status_code=503,
+            )
+
         return JSONResponse(
             {
                 "status": "ready",
                 "service": "workflow-intelligence",
+                "database_initialized": db_initialized,
+                "database_healthy": db_healthy,
                 "tools_count": 9,
                 "resources_count": 4,
                 "prompts_count": 3,
@@ -244,17 +282,35 @@ def main() -> None:
     args = parser.parse_args()
     settings = get_settings()
 
-    # In production, network transports require authentication unless a verified gateway is used
-    if args.transport != "stdio" and settings.workflow_env == "production":
-        if not settings.mcp_auth_token and not settings.trusted_auth_gateway:
+    # In production, enforce strict security safeguards on credentials and authentication
+    if settings.workflow_env == "production":
+        lowered_db_url = settings.database_url.lower()
+        if (
+            ":postgres@" in lowered_db_url
+            or ":password@" in lowered_db_url
+            or ":admin@" in lowered_db_url
+            or ":root@" in lowered_db_url
+        ):
             logger.critical(
-                "Production network startup aborted: MCP_AUTH_TOKEN is not configured and "
-                "TRUSTED_AUTH_GATEWAY is False. Network MCP endpoints must be authenticated."
+                "Production startup failed: default or trivial database credentials ('postgres:postgres') "
+                "are forbidden in production. Configure a secure POSTGRES_PASSWORD and DATABASE_URL."
             )
             raise RuntimeError(
-                "Production network startup aborted: MCP_AUTH_TOKEN is required for network exposure "
-                "unless TRUSTED_AUTH_GATEWAY=true is explicitly configured with a verified authenticating gateway."
+                "Production startup failed: default or trivial database credentials ('postgres:postgres') "
+                "are forbidden in production. Configure a secure POSTGRES_PASSWORD and DATABASE_URL."
             )
+
+        if args.transport != "stdio":
+            token = (settings.mcp_auth_token or "").strip()
+            if not token:
+                logger.critical(
+                    "Production network startup aborted: MCP_AUTH_TOKEN is required for network exposure. "
+                    "A gateway flag alone cannot be treated as proof of authentication; network endpoints fail closed."
+                )
+                raise RuntimeError(
+                    "Production network startup aborted: MCP_AUTH_TOKEN is required for network exposure. "
+                    "A gateway flag alone cannot be treated as proof of authentication; network endpoints fail closed."
+                )
 
     mcp = create_server()
 

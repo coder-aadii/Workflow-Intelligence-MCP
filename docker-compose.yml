@@ -24,19 +24,19 @@ services:
     restart: unless-stopped
     stop_grace_period: 15s
     ports:
-      - "${SERVER_PORT:-8000}:8000"
+      - "${SERVER_HOST:-127.0.0.1}:${SERVER_PORT:-8000}:8000"
     command: ["--transport", "unified", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       - WORKFLOW_ENV=${WORKFLOW_ENV:-production}
       - SERVER_TRANSPORT=${COMPOSE_SERVER_TRANSPORT:-unified}
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8000
-      - DATABASE_URL=${COMPOSE_DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-workflow_intelligence}}
+      - DATABASE_URL=${COMPOSE_DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be configured for production}@postgres:5432/${POSTGRES_DB:-workflow_intelligence}}
       - DUCKDB_PATH=${DUCKDB_PATH:-/app/data/procurement_costs.duckdb}
       - REDIS_URL=${COMPOSE_REDIS_URL:-redis://redis:6379/0}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-}
-      - TRUSTED_AUTH_GATEWAY=${TRUSTED_AUTH_GATEWAY:-true}
+      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:?MCP_AUTH_TOKEN must be configured for production deployment}
+      - TRUSTED_AUTH_GATEWAY=${TRUSTED_AUTH_GATEWAY:-false}
       - ANALYSIS_TIMEOUT_SECONDS=${ANALYSIS_TIMEOUT_SECONDS:-60}
       - QUERY_TIMEOUT_MS=${QUERY_TIMEOUT_MS:-30000}
     depends_on:
@@ -63,7 +63,7 @@ services:
     stop_grace_period: 15s
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be configured for production}
       - POSTGRES_DB=${POSTGRES_DB:-workflow_intelligence}
     volumes:
       - wimcp-postgres-data:/var/lib/postgresql/data
