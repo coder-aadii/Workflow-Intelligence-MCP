@@ -271,6 +271,49 @@ class TestAnalyticsService:
                 "bad3", "1; DELETE FROM procurement_costs", column="x"
             )
 
+    @pytest.mark.parametrize(
+        "adversarial_expr",
+        [
+            "SUM(cost); DROP TABLE users;",
+            "SUM(cost) -- line comment",
+            "SUM(cost) /* block comment */",
+            "SUM(cost) # comment",
+            "SUM(cost) \\ escape",
+            "SUM(cost) `backtick`",
+            'SUM(cost) + "double_quote"',
+            "SUM(cost) + 'unclosed",
+            "SUM(cost) | 1",
+            "SUM(cost) ^ 2",
+            "SUM(cost) & 3",
+            "SUM(cost) ~ 4",
+            "SUM(cost) << 1",
+            "SUM(cost) >> 1",
+            "SUM(cost)::int",
+            "SUM(cost)->1",
+            'SUM(cost)->>"attr"',
+            'SUM(cost) || "extra"',
+            "read_csv('secret.csv')",
+            "system('whoami')",
+            "(SELECT count(*) FROM users)",
+            "SUM(cost))",
+            "((SUM(cost)",
+            "SUM(cost)\x00",
+            "SUM(cost) [index]",
+            "SUM(cost) {block}",
+            "SUM(cost) @variable",
+            "SUM(cost) $variable",
+            "SUM(cost) ? param",
+        ],
+    )
+    def test_adversarial_custom_expressions_rejected(
+        self, analytics_service: AnalyticsService, adversarial_expr: str
+    ) -> None:
+        """Every adversarial SQL construct, comment, operator, and token must be strictly rejected."""
+        with pytest.raises(AnalyticsServiceError):
+            analytics_service.register_custom_metric(
+                "adversarial", adversarial_expr, column="cost"
+            )
+
     def test_compute_dynamic_metric(self, analytics_service: AnalyticsService) -> None:
         value = analytics_service.compute_dynamic_metric(
             "procurement_costs",

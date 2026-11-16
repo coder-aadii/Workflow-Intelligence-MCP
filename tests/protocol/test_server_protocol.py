@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import pytest
@@ -304,3 +305,129 @@ class TestServerProtocolErrorResilience:
         q3 = df[df["quarter"] == "Q3"]["processing_cost"].sum()
         q2 = df[df["quarter"] == "Q2"]["processing_cost"].sum()
         assert q3 > q2 * 2, f"Q3 spike missing: Q3={q3}, Q2={q2}"
+
+
+class TestDirectFastMCPToolCalls:
+    """Tests executing all 9 domain tools directly through the FastMCP tool handler layer."""
+
+    @pytest.fixture
+    def server(self) -> Any:
+        return create_server()
+
+    @pytest.mark.asyncio
+    async def test_call_all_9_tools_via_fastmcp(self, server: Any) -> None:
+        # 1. process_analyze_business_process
+        res1 = await server.call_tool(
+            "process_analyze_business_process",
+            {
+                "source_uri": str(EVENTS_CSV),
+                "case_id_col": "case_id",
+                "activity_col": "activity",
+                "timestamp_col": "timestamp",
+            },
+        )
+        assert res1.is_error is False
+        assert res1.structured_content["success"] is True
+
+        # 2. process_identify_bottlenecks
+        res2 = await server.call_tool(
+            "process_identify_bottlenecks",
+            {"source_uri": str(EVENTS_CSV), "threshold_std_dev": 2.0},
+        )
+        assert res2.is_error is False
+        assert res2.structured_content["success"] is True
+
+        # 3. process_score_automation_opportunities
+        res3 = await server.call_tool(
+            "process_score_automation_opportunities",
+            {"source_uri": str(EVENTS_CSV), "min_frequency": 10},
+        )
+        assert res3.is_error is False
+        assert res3.structured_content["success"] is True
+
+        # 4. exception_investigate_workflow
+        res4 = await server.call_tool(
+            "exception_investigate_workflow",
+            {
+                "case_id": "PO-9999",
+                "workflow_type": "purchase_order_creation",
+                "failure_payload": {
+                    "vendor_name": "ABC Technologies",
+                    "tax_id": "TX-123456",
+                    "discrepancy": "vendor_name_typo",
+                    "master_records": [
+                        {
+                            "entity_id": "VEND-001",
+                            "registered_name": "ABC Technology Pvt Ltd",
+                            "tax_id": "TX-123456",
+                        }
+                    ],
+                },
+            },
+        )
+        assert res4.is_error is False
+        assert res4.structured_content["case_id"] == "PO-9999"
+
+        # 5. exception_recommend_resolution
+        res5 = await server.call_tool(
+            "exception_recommend_resolution",
+            {
+                "exception_id": "EXC-100",
+                "policy_context": {"auto_approve": True},
+            },
+        )
+        assert res5.is_error is False
+        assert res5.structured_content["exception_id"] == "EXC-100"
+
+        # 6. exception_escalate_case
+        res6 = await server.call_tool(
+            "exception_escalate_case",
+            {
+                "case_id": "PO-100",
+                "reason": "Escalate to manager",
+                "target_department": "procurement",
+            },
+        )
+        assert res6.is_error is False
+        assert res6.structured_content["routed_department"] == "procurement"
+
+        # 7. decision_analyze_kpi_performance
+        res7 = await server.call_tool(
+            "decision_analyze_kpi_performance",
+            {
+                "metric_name": "processing_cost",
+                "source_uri": str(COSTS_CSV),
+                "timeframe_column": "quarter",
+                "timeframe_current": "Q3",
+                "timeframe_baseline": "Q2",
+            },
+        )
+        assert res7.is_error is False
+        assert res7.structured_content["metric_name"] == "processing_cost"
+
+        # 8. decision_explain_kpi_deviation
+        res8 = await server.call_tool(
+            "decision_explain_kpi_deviation",
+            {
+                "metric_name": "processing_cost",
+                "observed_delta": 45000.0,
+                "source_uri": str(COSTS_CSV),
+                "timeframe_column": "quarter",
+                "timeframe_current": "Q3",
+                "timeframe_baseline": "Q2",
+                "dimension": "order_id",
+            },
+        )
+        assert res8.is_error is False
+        assert res8.structured_content["metric_name"] == "processing_cost"
+
+        # 9. decision_generate_brief
+        res9 = await server.call_tool(
+            "decision_generate_brief",
+            {
+                "topic": "Q3 Procurement Cost Analysis",
+                "metric_ids": ["processing_cost"],
+            },
+        )
+        assert res9.is_error is False
+        assert res9.structured_content["topic"] == "Q3 Procurement Cost Analysis"

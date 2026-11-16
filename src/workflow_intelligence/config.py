@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     workflow_env: Literal["development", "staging", "production"] = Field(
         default="development", alias="WORKFLOW_ENV"
     )
-    server_transport: Literal[
-        "stdio", "sse", "streamable-http", "http", "unified"
-    ] = Field(default="stdio", alias="SERVER_TRANSPORT")
+    server_transport: Literal["stdio", "sse", "streamable-http", "http", "unified"] = (
+        Field(default="stdio", alias="SERVER_TRANSPORT")
+    )
     server_host: str = Field(default="127.0.0.1", alias="SERVER_HOST")
     server_port: int = Field(default=8000, alias="SERVER_PORT")
     database_url: str = Field(
@@ -49,9 +49,7 @@ class Settings(BaseSettings):
     analysis_timeout_seconds: float = Field(
         default=60.0, alias="ANALYSIS_TIMEOUT_SECONDS"
     )
-    query_timeout_ms: int = Field(
-        default=30000, alias="QUERY_TIMEOUT_MS"
-    )
+    query_timeout_ms: int = Field(default=30000, alias="QUERY_TIMEOUT_MS")
 
 
 @lru_cache(maxsize=1)

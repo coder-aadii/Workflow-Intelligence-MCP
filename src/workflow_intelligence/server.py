@@ -22,11 +22,6 @@ from starlette.responses import JSONResponse
 
 from workflow_intelligence import __version__
 from workflow_intelligence.config import get_settings
-from workflow_intelligence.security.auth import (
-    StaticTokenVerifier,
-    validate_production_auth_token,
-    validate_production_database_credentials,
-)
 from workflow_intelligence.observability.logging import (
     configure_logging,
     get_logger,
@@ -35,6 +30,11 @@ from workflow_intelligence.observability.logging import (
 from workflow_intelligence.observability.tracing import init_tracing
 from workflow_intelligence.prompts import register_prompts
 from workflow_intelligence.resources import register_resources
+from workflow_intelligence.security.auth import (
+    StaticTokenVerifier,
+    validate_production_auth_token,
+    validate_production_database_credentials,
+)
 from workflow_intelligence.services.analytics_service import AnalyticsService
 from workflow_intelligence.services.decision_service import DecisionService
 from workflow_intelligence.services.exception_service import ExceptionService

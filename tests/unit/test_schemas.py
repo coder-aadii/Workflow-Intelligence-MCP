@@ -634,7 +634,7 @@ class TestSchemaSerialization:
         """All schemas should reject invalid input types."""
         with pytest.raises(ValidationError):
             ProcessAnalyzeRequest(
-                source_uri=123,  # type: ignore[arg-type]
+                source_uri=123,
                 case_id_col="cid",
                 activity_col="act",
                 timestamp_col="ts",

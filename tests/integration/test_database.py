@@ -277,3 +277,62 @@ class TestInMemoryCache:
         assert cache.size() == 2
         cache.clear()
         assert cache.size() == 0
+
+
+class TestAlembicMigrations:
+    """Tests verifying the Alembic migration configuration and safe execution."""
+
+    def test_alembic_heads_and_offline_sql(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Verifies that Alembic configuration resolves and generates safe transactional DDL."""
+        from alembic import command
+        from alembic.config import Config
+
+        ini_path = Path("src/workflow_intelligence/persistence/migrations/alembic.ini")
+        assert ini_path.exists()
+
+        cfg = Config(str(ini_path))
+        # Generate SQL migration offline
+        command.upgrade(cfg, "head", sql=True)
+        captured = capsys.readouterr()
+        sql = captured.out
+
+        assert "CREATE TABLE workflow_instance" in sql
+        assert "CREATE TABLE exception_record" in sql
+        assert "CREATE TABLE audit_log" in sql
+        assert "CREATE TABLE alembic_version" in sql
+        assert "COMMIT;" in sql
+
+    def test_alembic_upgrade_and_current_on_sqlite(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verifies safe migration execution and head verification on a test database."""
+        import sqlite3
+
+        from alembic import command
+        from alembic.config import Config
+
+        db_path = tmp_path / "migration_test.db"
+        sqlite_url = f"sqlite:///{db_path}"
+
+        monkeypatch.setenv("DATABASE_URL", sqlite_url)
+
+        ini_path = Path("src/workflow_intelligence/persistence/migrations/alembic.ini")
+        cfg = Config(str(ini_path))
+        cfg.set_main_option("sqlalchemy.url", sqlite_url)
+
+        # Upgrade to head
+        command.upgrade(cfg, "head")
+
+        # Verify tables created
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = {row[0] for row in cursor.fetchall()}
+        conn.close()
+
+        assert "workflow_instance" in tables
+        assert "exception_record" in tables
+        assert "audit_log" in tables
+        assert "alembic_version" in tables

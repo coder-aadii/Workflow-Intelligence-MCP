@@ -52,14 +52,20 @@ async def test_stdio_transport(server) -> bool:
             },
         )
         assert not res.is_error
-        print("  [PASS] STDIO tools/call: decision_analyze_kpi_performance executed successfully")
+        print(
+            "  [PASS] STDIO tools/call: decision_analyze_kpi_performance executed successfully"
+        )
 
         # Resources
         resources = await client.list_resources()
         templates = await client.list_resource_templates()
         assert len(resources) == 3, f"Expected 3 static resources, got {len(resources)}"
-        assert len(templates) == 1, f"Expected 1 resource template, got {len(templates)}"
-        print(f"  [PASS] STDIO resources: {len(resources)} static resources + {len(templates)} template registered (total 4)")
+        assert len(templates) == 1, (
+            f"Expected 1 resource template, got {len(templates)}"
+        )
+        print(
+            f"  [PASS] STDIO resources: {len(resources)} static resources + {len(templates)} template registered (total 4)"
+        )
 
         # Prompts
         prompts = await client.list_prompts()
@@ -72,6 +78,7 @@ async def test_stdio_transport(server) -> bool:
 async def test_stdio_subprocess() -> bool:
     print("\nTesting STDIO transport (real OS subprocess client)...")
     import os
+
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
 
@@ -90,8 +97,12 @@ async def test_stdio_subprocess() -> bool:
             )
 
             tools_res = await session.list_tools()
-            assert len(tools_res.tools) == 9, f"Expected 9 tools, got {len(tools_res.tools)}"
-            print(f"  [PASS] STDIO Subprocess tools/list: {len(tools_res.tools)} tools registered")
+            assert len(tools_res.tools) == 9, (
+                f"Expected 9 tools, got {len(tools_res.tools)}"
+            )
+            print(
+                f"  [PASS] STDIO Subprocess tools/list: {len(tools_res.tools)} tools registered"
+            )
 
             call_res = await session.call_tool(
                 "decision_analyze_kpi_performance",
@@ -104,7 +115,9 @@ async def test_stdio_subprocess() -> bool:
                 },
             )
             assert not call_res.is_error
-            print("  [PASS] STDIO Subprocess tools/call: decision_analyze_kpi_performance executed successfully")
+            print(
+                "  [PASS] STDIO Subprocess tools/call: decision_analyze_kpi_performance executed successfully"
+            )
 
             resources_res = await session.list_resources()
             prompts_res = await session.list_prompts()
@@ -123,11 +136,15 @@ def test_http_transports(server, token: str = "test-token-phase5") -> bool:
     with TestClient(app) as client:
         # 1. Probes
         r_health = client.get("/health")
-        assert r_health.status_code == 200, f"Health check failed: {r_health.status_code}"
+        assert r_health.status_code == 200, (
+            f"Health check failed: {r_health.status_code}"
+        )
         print("  [PASS] Health check: GET /health -> 200 OK")
 
         r_ready = client.get("/ready")
-        assert r_ready.status_code == 200, f"Readiness probe failed: {r_ready.status_code}"
+        assert r_ready.status_code == 200, (
+            f"Readiness probe failed: {r_ready.status_code}"
+        )
         print("  [PASS] Readiness probe: GET /ready -> 200 OK")
 
         init_payload = {
@@ -204,7 +221,9 @@ def test_http_transports(server, token: str = "test-token-phase5") -> bool:
 
         # 7. SSE Unauthenticated -> 401
         r_sse_unauth = client.get("/sse")
-        assert r_sse_unauth.status_code == 401, f"Expected 401, got {r_sse_unauth.status_code}"
+        assert r_sse_unauth.status_code == 401, (
+            f"Expected 401, got {r_sse_unauth.status_code}"
+        )
         print("  [PASS] SSE: Unauthenticated request rejected (401)")
 
         # 8. SSE Authenticated -> 200 Stream

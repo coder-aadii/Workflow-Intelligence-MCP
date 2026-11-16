@@ -5,15 +5,14 @@ reliability, execution timeouts, and production startup guards.
 from __future__ import annotations
 
 import argparse
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastmcp import FastMCP
-from fastmcp.client import Client
 from starlette.testclient import TestClient
 
 from workflow_intelligence.config import Settings
+from workflow_intelligence.schemas.process import ProcessAnalyzeRequest
 from workflow_intelligence.security.auth import StaticTokenVerifier
 from workflow_intelligence.server import (
     create_server,
@@ -24,7 +23,6 @@ from workflow_intelligence.services.process_service import (
     ProcessService,
     ProcessServiceError,
 )
-from workflow_intelligence.schemas.process import ProcessAnalyzeRequest
 
 
 class TestStreamableHTTPTransport:
@@ -167,7 +165,12 @@ class TestStreamableHTTPTransport:
             # resources/list
             res_resp = client.post(
                 "/mcp",
-                json={"jsonrpc": "2.0", "id": 4, "method": "resources/list", "params": {}},
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "resources/list",
+                    "params": {},
+                },
                 headers=headers,
             )
             assert res_resp.status_code == 200
@@ -176,7 +179,12 @@ class TestStreamableHTTPTransport:
             # prompts/list
             prompt_resp = client.post(
                 "/mcp",
-                json={"jsonrpc": "2.0", "id": 5, "method": "prompts/list", "params": {}},
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "prompts/list",
+                    "params": {},
+                },
                 headers=headers,
             )
             assert prompt_resp.status_code == 200
@@ -317,7 +325,9 @@ class TestProductionStartupGuards:
             database_url="postgresql+asyncpg://app_user:secure_pass_123@localhost:5432/workflow_intelligence",
         )
 
-        with patch("workflow_intelligence.server.get_settings", return_value=prod_settings):
+        with patch(
+            "workflow_intelligence.server.get_settings", return_value=prod_settings
+        ):
             with patch("argparse.ArgumentParser.parse_args") as mock_args:
                 mock_args.return_value = argparse.Namespace(
                     transport="streamable-http", host="127.0.0.1", port=8000
@@ -326,7 +336,9 @@ class TestProductionStartupGuards:
                     main()
                 assert "Production network startup aborted" in str(exc_info.value)
 
-    def test_production_network_startup_fails_even_with_gateway_flag_if_token_missing(self) -> None:
+    def test_production_network_startup_fails_even_with_gateway_flag_if_token_missing(
+        self,
+    ) -> None:
         """A gateway flag alone cannot be treated as proof of authentication without token enforcement."""
         prod_settings = Settings(
             workflow_env="production",
@@ -336,14 +348,19 @@ class TestProductionStartupGuards:
             database_url="postgresql+asyncpg://app_user:secure_pass_123@localhost:5432/workflow_intelligence",
         )
 
-        with patch("workflow_intelligence.server.get_settings", return_value=prod_settings):
+        with patch(
+            "workflow_intelligence.server.get_settings", return_value=prod_settings
+        ):
             with patch("argparse.ArgumentParser.parse_args") as mock_args:
                 mock_args.return_value = argparse.Namespace(
                     transport="streamable-http", host="127.0.0.1", port=8000
                 )
                 with pytest.raises(RuntimeError) as exc_info:
                     main()
-                assert "A gateway flag alone cannot be treated as proof of authentication" in str(exc_info.value)
+                assert (
+                    "A gateway flag alone cannot be treated as proof of authentication"
+                    in str(exc_info.value)
+                )
 
     def test_production_startup_fails_with_default_postgres_password(self) -> None:
         """In production, default 'postgres:postgres' database credentials fail startup."""
@@ -354,7 +371,9 @@ class TestProductionStartupGuards:
             database_url="postgresql+asyncpg://postgres:postgres@localhost:5432/workflow_intelligence",
         )
 
-        with patch("workflow_intelligence.server.get_settings", return_value=prod_settings):
+        with patch(
+            "workflow_intelligence.server.get_settings", return_value=prod_settings
+        ):
             with patch("argparse.ArgumentParser.parse_args") as mock_args:
                 mock_args.return_value = argparse.Namespace(
                     transport="stdio", host="127.0.0.1", port=8000
@@ -363,7 +382,9 @@ class TestProductionStartupGuards:
                     main()
                 assert "default or trivial database credentials" in str(exc_info.value)
 
-    def test_production_network_startup_succeeds_with_valid_token_and_secure_db(self) -> None:
+    def test_production_network_startup_succeeds_with_valid_token_and_secure_db(
+        self,
+    ) -> None:
         """In production, configuring a valid token and secure credentials allows network startup."""
         prod_settings = Settings(
             workflow_env="production",
@@ -373,7 +394,9 @@ class TestProductionStartupGuards:
             database_url="postgresql+asyncpg://app_user:strong_prod_pass_987@localhost:5432/workflow_intelligence",
         )
 
-        with patch("workflow_intelligence.server.get_settings", return_value=prod_settings):
+        with patch(
+            "workflow_intelligence.server.get_settings", return_value=prod_settings
+        ):
             with patch("argparse.ArgumentParser.parse_args") as mock_args:
                 mock_args.return_value = argparse.Namespace(
                     transport="streamable-http", host="127.0.0.1", port=8000
@@ -392,7 +415,9 @@ class TestProductionStartupGuards:
             database_url="postgresql+asyncpg://app_user:strong_prod_pass_987@localhost:5432/workflow_intelligence",
         )
 
-        with patch("workflow_intelligence.server.get_settings", return_value=prod_settings):
+        with patch(
+            "workflow_intelligence.server.get_settings", return_value=prod_settings
+        ):
             with patch("argparse.ArgumentParser.parse_args") as mock_args:
                 mock_args.return_value = argparse.Namespace(
                     transport="stdio", host="127.0.0.1", port=8000
@@ -412,17 +437,23 @@ class TestDatabaseReadinessBehavior:
             mcp_auth_token="valid-secret-token",
             database_url="postgresql+asyncpg://app_user:strong_prod_pass_987@localhost:5432/workflow_intelligence",
         )
-        with patch("workflow_intelligence.server.get_settings", return_value=prod_settings):
+        with patch(
+            "workflow_intelligence.server.get_settings", return_value=prod_settings
+        ):
             mcp = create_server()
             app = create_unified_http_app(mcp)
             with patch(
                 "workflow_intelligence.persistence.database.init_db",
-                AsyncMock(side_effect=ConnectionRefusedError("PostgreSQL connection refused")),
+                AsyncMock(
+                    side_effect=ConnectionRefusedError("PostgreSQL connection refused")
+                ),
             ):
                 with pytest.raises(RuntimeError) as exc_info:
                     with TestClient(app):
                         pass
-                assert "Production database initialization failed" in str(exc_info.value)
+                assert "Production database initialization failed" in str(
+                    exc_info.value
+                )
 
     def test_production_readiness_fails_503_when_database_uninitialized(self) -> None:
         """In production, /ready returns 503 if database initialization has not completed."""
@@ -431,12 +462,22 @@ class TestDatabaseReadinessBehavior:
             mcp_auth_token="valid-secret-token",
             database_url="postgresql+asyncpg://app_user:strong_prod_pass_987@localhost:5432/workflow_intelligence",
         )
-        with patch("workflow_intelligence.server.get_settings", return_value=prod_settings):
+        with patch(
+            "workflow_intelligence.server.get_settings", return_value=prod_settings
+        ):
             mcp = create_server()
             app = create_unified_http_app(mcp)
-            with patch("workflow_intelligence.persistence.database.init_db", AsyncMock()):
-                with patch("workflow_intelligence.persistence.database.is_db_initialized", return_value=False):
-                    with patch("workflow_intelligence.persistence.database.check_db_health", AsyncMock(return_value=False)):
+            with patch(
+                "workflow_intelligence.persistence.database.init_db", AsyncMock()
+            ):
+                with patch(
+                    "workflow_intelligence.persistence.database.is_db_initialized",
+                    return_value=False,
+                ):
+                    with patch(
+                        "workflow_intelligence.persistence.database.check_db_health",
+                        AsyncMock(return_value=False),
+                    ):
                         with TestClient(app) as client:
                             r = client.get("/ready")
                             assert r.status_code == 503
@@ -450,17 +491,30 @@ class TestDatabaseReadinessBehavior:
             mcp_auth_token="valid-secret-token",
             database_url="postgresql+asyncpg://app_user:strong_prod_pass_987@localhost:5432/workflow_intelligence",
         )
-        with patch("workflow_intelligence.server.get_settings", return_value=prod_settings):
+        with patch(
+            "workflow_intelligence.server.get_settings", return_value=prod_settings
+        ):
             mcp = create_server()
             app = create_unified_http_app(mcp)
-            with patch("workflow_intelligence.persistence.database.init_db", AsyncMock()):
-                with patch("workflow_intelligence.persistence.database.is_db_initialized", return_value=True):
-                    with patch("workflow_intelligence.persistence.database.check_db_health", AsyncMock(return_value=False)):
+            with patch(
+                "workflow_intelligence.persistence.database.init_db", AsyncMock()
+            ):
+                with patch(
+                    "workflow_intelligence.persistence.database.is_db_initialized",
+                    return_value=True,
+                ):
+                    with patch(
+                        "workflow_intelligence.persistence.database.check_db_health",
+                        AsyncMock(return_value=False),
+                    ):
                         with TestClient(app) as client:
                             r = client.get("/ready")
                             assert r.status_code == 503
                             assert r.json()["status"] == "not_ready"
-                            assert "Database connectivity check failed" in r.json()["error"]
+                            assert (
+                                "Database connectivity check failed"
+                                in r.json()["error"]
+                            )
 
     def test_production_readiness_succeeds_200_when_database_ready(self) -> None:
         """In production, /ready returns 200 when database is initialized and healthy."""
@@ -469,12 +523,22 @@ class TestDatabaseReadinessBehavior:
             mcp_auth_token="valid-secret-token",
             database_url="postgresql+asyncpg://app_user:strong_prod_pass_987@localhost:5432/workflow_intelligence",
         )
-        with patch("workflow_intelligence.server.get_settings", return_value=prod_settings):
+        with patch(
+            "workflow_intelligence.server.get_settings", return_value=prod_settings
+        ):
             mcp = create_server()
             app = create_unified_http_app(mcp)
-            with patch("workflow_intelligence.persistence.database.init_db", AsyncMock()):
-                with patch("workflow_intelligence.persistence.database.is_db_initialized", return_value=True):
-                    with patch("workflow_intelligence.persistence.database.check_db_health", AsyncMock(return_value=True)):
+            with patch(
+                "workflow_intelligence.persistence.database.init_db", AsyncMock()
+            ):
+                with patch(
+                    "workflow_intelligence.persistence.database.is_db_initialized",
+                    return_value=True,
+                ):
+                    with patch(
+                        "workflow_intelligence.persistence.database.check_db_health",
+                        AsyncMock(return_value=True),
+                    ):
                         with TestClient(app) as client:
                             r = client.get("/ready")
                             assert r.status_code == 200
@@ -484,11 +548,19 @@ class TestDatabaseReadinessBehavior:
     def test_development_readiness_probe_allows_offline_demo_mode(self) -> None:
         """In development/demo mode, /ready returns 200 even if database is offline."""
         dev_settings = Settings(workflow_env="development")
-        with patch("workflow_intelligence.server.get_settings", return_value=dev_settings):
+        with patch(
+            "workflow_intelligence.server.get_settings", return_value=dev_settings
+        ):
             mcp = create_server()
             app = create_unified_http_app(mcp)
-            with patch("workflow_intelligence.persistence.database.is_db_initialized", return_value=False):
-                with patch("workflow_intelligence.persistence.database.check_db_health", AsyncMock(return_value=False)):
+            with patch(
+                "workflow_intelligence.persistence.database.is_db_initialized",
+                return_value=False,
+            ):
+                with patch(
+                    "workflow_intelligence.persistence.database.check_db_health",
+                    AsyncMock(return_value=False),
+                ):
                     with TestClient(app) as client:
                         r = client.get("/ready")
                         assert r.status_code == 200
@@ -542,7 +614,9 @@ class TestPlaceholderCredentialRejection:
             mcp_auth_token=placeholder_token,
             database_url="postgresql+asyncpg://app_user:strong_prod_pass_987@localhost:5432/workflow_intelligence",
         )
-        with patch("workflow_intelligence.server.get_settings", return_value=prod_settings):
+        with patch(
+            "workflow_intelligence.server.get_settings", return_value=prod_settings
+        ):
             with patch("sys.argv", ["server", "--transport", "streamable-http"]):
                 with pytest.raises(RuntimeError) as exc_info:
                     main()
@@ -570,11 +644,15 @@ class TestPlaceholderCredentialRejection:
             postgres_password=placeholder_pw,
             database_url=f"postgresql+asyncpg://app_user:{placeholder_pw}@localhost:5432/workflow_intelligence",
         )
-        with patch("workflow_intelligence.server.get_settings", return_value=prod_settings):
+        with patch(
+            "workflow_intelligence.server.get_settings", return_value=prod_settings
+        ):
             with patch("sys.argv", ["server", "--transport", "stdio"]):
                 with pytest.raises(RuntimeError) as exc_info:
                     main()
-                assert "database credentials" in str(exc_info.value) or "POSTGRES_PASSWORD" in str(exc_info.value)
+                assert "database credentials" in str(
+                    exc_info.value
+                ) or "POSTGRES_PASSWORD" in str(exc_info.value)
 
 
 class TestDuckDBQueryTimeoutAndCancellation:
@@ -583,8 +661,12 @@ class TestDuckDBQueryTimeoutAndCancellation:
     def test_duckdb_adapter_wires_query_timeout_ms_from_settings(self) -> None:
         """DuckDBAdapter initializes query_timeout_ms from settings by default."""
         custom_settings = Settings(query_timeout_ms=12345)
-        with patch("workflow_intelligence.config.get_settings", return_value=custom_settings):
-            from workflow_intelligence.adapters.analytics.duckdb_adapter import DuckDBAdapter
+        with patch(
+            "workflow_intelligence.config.get_settings", return_value=custom_settings
+        ):
+            from workflow_intelligence.adapters.analytics.duckdb_adapter import (
+                DuckDBAdapter,
+            )
 
             adapter = DuckDBAdapter(":memory:")
             assert adapter._query_timeout_ms == 12345

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hmac
+
 from fastmcp.server.auth import AccessToken, TokenVerifier
 
 

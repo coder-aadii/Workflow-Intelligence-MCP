@@ -10,7 +10,6 @@ Measures:
 
 from __future__ import annotations
 
-import os
 import sys
 import time
 import tracemalloc
@@ -20,12 +19,13 @@ from pathlib import Path
 repo_root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(repo_root / "src"))
 
-from workflow_intelligence.config import Settings
 from workflow_intelligence.schemas.process import ProcessAnalyzeRequest
 from workflow_intelligence.services.process_service import ProcessService
 
 
-def run_benchmark(dataset_path: str | Path | None = None) -> dict[str, float | int | str]:
+def run_benchmark(
+    dataset_path: str | Path | None = None,
+) -> dict[str, float | int | str]:
     if dataset_path is None:
         dataset_path = repo_root / "local" / "BPIC19_flat.csv"
 
@@ -35,10 +35,10 @@ def run_benchmark(dataset_path: str | Path | None = None) -> dict[str, float | i
         return {"status": "missing_dataset", "path": str(dataset_path)}
 
     file_size_mb = dataset_path.stat().st_size / (1024 * 1024)
-    print(f"============================================================")
-    print(f"BPIC19 BENCHMARK SUITE — Workflow Intelligence MCP")
+    print("============================================================")
+    print("BPIC19 BENCHMARK SUITE — Workflow Intelligence MCP")
     print(f"Dataset:   {dataset_path.name} ({file_size_mb:.2f} MB)")
-    print(f"============================================================")
+    print("============================================================")
 
     # Disable timeout for full unconstrained benchmark run
     service = ProcessService()
@@ -84,7 +84,9 @@ def run_benchmark(dataset_path: str | Path | None = None) -> dict[str, float | i
     print(f"Discovered Transitions:   {metrics['transitions_count']}")
     print(f"Avg Case Duration:        {metrics['avg_case_duration_hours']} hours")
     print(f"Total Execution Time:     {metrics['elapsed_seconds']} s")
-    print(f"Peak Memory Allocated:    {metrics['peak_memory_mb']} MB (~{round(peak_mb / 1024, 2)} GB)")
+    print(
+        f"Peak Memory Allocated:    {metrics['peak_memory_mb']} MB (~{round(peak_mb / 1024, 2)} GB)"
+    )
     print("============================================================\n")
 
     return metrics

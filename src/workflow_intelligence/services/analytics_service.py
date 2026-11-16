@@ -94,8 +94,9 @@ _ALLOWED_KEYWORDS = {
     "TRUE",
     "FALSE",
 }
-# Keywords that are never permitted in custom expressions (prevents injection).
+# Keywords that are never permitted in custom expressions (prevents injection / escape).
 _DENIED_KEYWORDS = {
+    # DDL / DML / Admin statements
     "SELECT",
     "INSERT",
     "UPDATE",
@@ -115,9 +116,51 @@ _DENIED_KEYWORDS = {
     "DETACH",
     "LOAD",
     "INSTALL",
+    "SET",
+    "SHOW",
+    "DESCRIBE",
+    "EXPLAIN",
+    "EXPORT",
+    "IMPORT",
+    "CHECKPOINT",
+    # Clauses disallowed in scalar metric formulas
+    "FROM",
+    "WHERE",
+    "JOIN",
+    "GROUP",
+    "ORDER",
+    "HAVING",
+    "LIMIT",
+    "OFFSET",
+    "WITH",
+    "INTO",
+    "VALUES",
+    "TABLE",
+    "DATABASE",
+    "SCHEMA",
+    "VIEW",
+    "INDEX",
+    "TRIGGER",
+    "FUNCTION",
+    "PROCEDURE",
+    "DECLARE",
+    # Potentially dangerous DuckDB functions
+    "SYSTEM",
+    "GETENV",
+    "CURRENT_SETTING",
+    "READ_CSV",
+    "READ_PARQUET",
+    "READ_JSON",
+    "WRITE_CSV",
+    "TO_CSV",
+    "QUERY",
+    "VERSION",
 }
 # SQL operators and punctuation permitted in custom expressions.
 _ALLOWED_PUNCTUATION = set("()+-*/%.,=<>!")
+_ALLOWED_CHARS = set(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_ ()+-*/%.,=<>!\t\n\r"
+)
 
 # Regex to strip aggregation wrappers (SUM(col) -> col) for per-row stats.
 _STRIP_AGGREGATION_RE = re.compile(
@@ -128,21 +171,85 @@ _STRIP_AGGREGATION_RE = re.compile(
 def _validate_custom_expression(expression: str) -> None:
     """Validate that a custom metric expression only uses safe SQL.
 
-    Allows aggregation functions (SUM, AVG, COUNT, MIN, MAX, STDDEV), column
-    identifiers, numeric literals, string literals, SQL operators, and a
-    narrow set of keywords. Rejects anything that could be used for SQL
-    injection (subqueries, UNION, DROP, INSERT, DELETE, UPDATE, EXEC, etc.).
+    Every single character and SQL token is strictly validated. Rejects semicolons,
+    comments (-- or /* */ or #), unexpected punctuation, unclosed strings, unbalanced
+    parentheses, unsupported operators, subqueries, and unauthorized keywords or functions.
     """
     if not expression or not expression.strip():
         raise AnalyticsServiceError("Custom expression must not be empty.")
-    # Mask string literals so their contents are not scanned as tokens.
-    sanitized = re.sub(r"'[^']*'", "''", expression)
-    # Tokenize: identifiers, numbers, operators/punctuation.
+
+    # 1. Reject comments, semicolons, and escape sequences upfront
+    if ";" in expression:
+        raise AnalyticsServiceError("Semicolons are forbidden in custom expressions.")
+    if (
+        "--" in expression
+        or "/*" in expression
+        or "*/" in expression
+        or "#" in expression
+    ):
+        raise AnalyticsServiceError("SQL comments are forbidden in custom expressions.")
+    if "\\" in expression or "`" in expression or "\x00" in expression:
+        raise AnalyticsServiceError(
+            "Disallowed escape or control characters in custom expression."
+        )
+
+    # Reject unsupported compound operators
+    for op in ("<<", ">>", "->", "||", "::", ".."):
+        if op in expression:
+            raise AnalyticsServiceError(
+                f"Unsupported operator in custom expression: {op!r}."
+            )
+
+    # 2. Validate string literal quotes and mask them out
+    # Odd number of quotes indicates unclosed literal
+    if expression.count("'") % 2 != 0:
+        raise AnalyticsServiceError(
+            "Unclosed or malformed string literal in custom expression."
+        )
+
+    # Replace valid SQL string literals (allowing escaped single quotes '') with dummy token
+    sanitized = re.sub(r"'(?:''|[^'])*'", "__LITERAL__", expression)
+    if "'" in sanitized:
+        raise AnalyticsServiceError("Malformed string literal in custom expression.")
+
+    # 3. Character-level validation: every remaining character must belong to allowed set
+    for char in sanitized:
+        if char not in _ALLOWED_CHARS:
+            raise AnalyticsServiceError(
+                f"Disallowed character or operator in custom expression: {char!r}. "
+                "Only standard arithmetic operators, comparisons, and aggregations are permitted."
+            )
+
+    # 4. Check balanced parentheses
+    depth = 0
+    for char in sanitized:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth < 0:
+                raise AnalyticsServiceError(
+                    "Unbalanced parentheses in custom expression."
+                )
+    if depth != 0:
+        raise AnalyticsServiceError("Unbalanced parentheses in custom expression.")
+
+    # 5. Full tokenization without leaving uninspected characters
     tokens = re.findall(
         r"[A-Za-z_][A-Za-z0-9_]*|\d+(?:\.\d+)?|[\(\)\+\-\*/\%,=<>!]",
         sanitized,
     )
+    # Ensure all non-whitespace characters were tokenized (no gaps or ignored syntax)
+    reconstructed = re.sub(r"\s+", "", sanitized)
+    if "".join(tokens) != reconstructed:
+        raise AnalyticsServiceError(
+            "Custom expression contains unsupported or malformed syntax."
+        )
+
+    # 6. Validate every token
     for token in tokens:
+        if token == "__LITERAL__":
+            continue
         upper = token.upper()
         if upper in _DENIED_KEYWORDS:
             raise AnalyticsServiceError(
@@ -150,12 +257,16 @@ def _validate_custom_expression(expression: str) -> None:
                 "Only SUM, AVG, COUNT, MIN, MAX, STDDEV aggregations and column "
                 "references are allowed."
             )
+        if upper.startswith(("READ_", "WRITE_", "DUCKDB_", "PRAGMA_")):
+            raise AnalyticsServiceError(
+                f"Disallowed function call in custom expression: {token!r}."
+            )
         if upper in _ALLOWED_AGGREGATIONS or upper in _ALLOWED_KEYWORDS:
             continue
         if re.fullmatch(r"\d+(?:\.\d+)?", token):
             continue
         if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", token):
-            # Column identifier - allowed.
+            # Column identifier
             continue
         if token in _ALLOWED_PUNCTUATION:
             continue

@@ -32,9 +32,7 @@ import structlog
 # Ensure default fallback logger factory directs all unconfigured logs to sys.stderr,
 # preventing stdout pollution which breaks MCP STDIO JSON-RPC framing.
 if not structlog.is_configured():
-    structlog.configure(
-        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr)
-    )
+    structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=sys.stderr))
 
 
 def configure_logging(

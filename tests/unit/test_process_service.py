@@ -387,3 +387,99 @@ class TestProcessServiceAutomation:
         report = process_service.score_automation_opportunities(request)
         assert len(report.candidates) > 0
         assert report.methodology
+
+
+def _crash_worker() -> None:
+    import os
+
+    os._exit(1)
+
+
+def _oversized_worker() -> bytearray:
+    return bytearray(51 * 1024 * 1024)
+
+
+def _slow_worker() -> None:
+    import time
+
+    time.sleep(2.0)
+
+
+class TestProcessServiceWorkerIsolation:
+    """Tests for worker process timeouts, crash recovery, and oversized result handling."""
+
+    def test_worker_crash_raises_descriptive_error(
+        self, process_service: ProcessService
+    ) -> None:
+        """When an isolated worker exits unexpectedly, ProcessServiceError is raised."""
+        with pytest.raises(ProcessServiceError) as exc_info:
+            process_service._run_with_timeout(_crash_worker)
+        assert "Process mining worker terminated unexpectedly" in str(exc_info.value)
+
+    def test_oversized_payload_rejected(self, process_service: ProcessService) -> None:
+        """When an isolated worker returns a payload exceeding 50MB, it is rejected."""
+        with pytest.raises(ProcessServiceError) as exc_info:
+            process_service._run_with_timeout(_oversized_worker)
+        assert "exceeds the maximum allowed payload limit" in str(exc_info.value)
+
+    def test_timeout_bounds_execution(
+        self, process_service: ProcessService, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When an isolated worker exceeds the timeout, it is terminated."""
+        from workflow_intelligence.config import Settings
+
+        monkeypatch.setattr(
+            "workflow_intelligence.services.process_service.get_settings",
+            lambda: Settings(analysis_timeout_seconds=0.2),
+        )
+        with pytest.raises(ProcessServiceError) as exc_info:
+            process_service._run_with_timeout(_slow_worker)
+        assert "timed out after 0.2 seconds" in str(exc_info.value)
+
+
+class TestPM4PyAdapterDirect:
+    """Direct tests for PM4PyAdapter DFG and performance DFG discovery."""
+
+    def test_discover_dfg_and_performance_dfg(self) -> None:
+        from workflow_intelligence.adapters.process_mining.pm4py_adapter import (
+            PM4PyAdapter,
+        )
+
+        adapter = PM4PyAdapter()
+        df = pd.DataFrame(
+            [
+                {
+                    "case_id": "C1",
+                    "activity": "Start",
+                    "timestamp": "2026-01-01T09:00:00",
+                },
+                {
+                    "case_id": "C1",
+                    "activity": "End",
+                    "timestamp": "2026-01-01T10:00:00",
+                },
+                {
+                    "case_id": "C2",
+                    "activity": "Start",
+                    "timestamp": "2026-01-01T09:00:00",
+                },
+                {
+                    "case_id": "C2",
+                    "activity": "End",
+                    "timestamp": "2026-01-01T11:00:00",
+                },
+            ]
+        )
+        formatted = adapter.format_event_log(
+            df,
+            case_id_col="case_id",
+            activity_col="activity",
+            timestamp_col="timestamp",
+        )
+        dfg = adapter.discover_dfg(formatted)
+        assert ("Start", "End") in dfg
+        assert dfg[("Start", "End")] == 2
+
+        perf_dfg = adapter.discover_performance_dfg(formatted)
+        assert ("Start", "End") in perf_dfg
+        assert perf_dfg[("Start", "End")]["mean_duration_hours"] > 0

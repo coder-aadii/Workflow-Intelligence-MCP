@@ -402,7 +402,9 @@ class ExceptionService:
                             workflow_type=request.workflow_type,
                             status="failed",
                             metadata={"case_id": request.case_id},
-                            item_id=request.case_id if len(request.case_id) <= 36 else None,
+                            item_id=request.case_id
+                            if len(request.case_id) <= 36
+                            else None,
                         )
                     else:
                         await wf_repo.update_status(wf.id, "failed")
@@ -451,7 +453,9 @@ class ExceptionService:
             if isinstance(exc, ExceptionServiceError):
                 raise
             if get_settings().workflow_env == "production":
-                logger.error("Production database failure during exception persistence: %s", exc)
+                logger.error(
+                    "Production database failure during exception persistence: %s", exc
+                )
                 raise ExceptionServiceError(
                     f"Production database persistence failure: {exc}"
                 ) from exc
@@ -507,9 +511,7 @@ class ExceptionService:
             required_approval_tier=approval_tier if not auto_approve else None,
         )
 
-    async def arecommend_resolution(
-        self, request: ResolutionRequest
-    ) -> ResolutionPlan:
+    async def arecommend_resolution(self, request: ResolutionRequest) -> ResolutionPlan:
         """Asynchronous resolution recommendation handler with persistence."""
         policy_context = request.policy_context or {}
         auto_approve = bool(policy_context.get("auto_approve", False))
@@ -557,6 +559,7 @@ class ExceptionService:
                                 details={
                                     "exception_id": request.exception_id,
                                     "workflow_id": record.workflow_id,
+                                    "approval_tier": approval_tier,
                                     "remediation_action": remediation_action,
                                     "auto_resolved": True,
                                 },
@@ -566,7 +569,9 @@ class ExceptionService:
             if isinstance(exc, ExceptionServiceError):
                 raise
             if get_settings().workflow_env == "production":
-                logger.error("Production database failure during recommendation: %s", exc)
+                logger.error(
+                    "Production database failure during recommendation: %s", exc
+                )
                 raise ExceptionServiceError(
                     f"Production database lookup failure: {exc}"
                 ) from exc
@@ -761,9 +766,7 @@ class ExceptionService:
             target_department=target_department,
         )
 
-    async def aretrieve_exception(
-        self, exception_id: str
-    ) -> dict[str, Any] | None:
+    async def aretrieve_exception(self, exception_id: str) -> dict[str, Any] | None:
         """Retrieve an exception record by identifier from database or memory."""
         try:
             async for session in get_db_session():
@@ -787,7 +790,9 @@ class ExceptionService:
             if isinstance(exc, ExceptionServiceError):
                 raise
             if get_settings().workflow_env == "production":
-                logger.error("Production database failure during exception retrieval: %s", exc)
+                logger.error(
+                    "Production database failure during exception retrieval: %s", exc
+                )
                 raise ExceptionServiceError(
                     f"Production database retrieval failure: {exc}"
                 ) from exc
@@ -808,18 +813,24 @@ class ExceptionService:
 
                 record = await exc_repo.get(exception_id)
                 if record is None:
-                    raise ExceptionServiceError(f"Exception '{exception_id}' not found.")
+                    raise ExceptionServiceError(
+                        f"Exception '{exception_id}' not found."
+                    )
 
                 if record.is_resolved:
                     return {
                         "exception_id": exception_id,
                         "status": "already_resolved",
-                        "resolved_at": record.resolved_at.isoformat() if record.resolved_at else None,
+                        "resolved_at": record.resolved_at.isoformat()
+                        if record.resolved_at
+                        else None,
                     }
 
                 async with session.begin():
                     await exc_repo.mark_resolved(record.id)
-                    wf_exceptions = await exc_repo.get_by_workflow_id(record.workflow_id)
+                    wf_exceptions = await exc_repo.get_by_workflow_id(
+                        record.workflow_id
+                    )
                     if all(e.is_resolved or e.id == record.id for e in wf_exceptions):
                         await wf_repo.complete_workflow(record.workflow_id)
 
@@ -844,7 +855,9 @@ class ExceptionService:
             if isinstance(exc, ExceptionServiceError):
                 raise
             if get_settings().workflow_env == "production":
-                logger.error("Production database failure during exception resolution: %s", exc)
+                logger.error(
+                    "Production database failure during exception resolution: %s", exc
+                )
                 raise ExceptionServiceError(
                     f"Production database resolution failure: {exc}"
                 ) from exc

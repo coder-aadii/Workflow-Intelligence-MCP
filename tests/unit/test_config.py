@@ -7,7 +7,7 @@ from workflow_intelligence.config import Settings, get_settings
 
 def test_settings_defaults() -> None:
     """Settings should expose documented defaults."""
-    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    settings = Settings(_env_file=None)
     assert settings.workflow_env == "development"
     assert settings.server_transport == "stdio"
     assert settings.server_host == "127.0.0.1"
@@ -36,7 +36,7 @@ def test_settings_loads_env_example(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    settings = Settings(_env_file=env_file)  # type: ignore[call-arg]
+    settings = Settings(_env_file=env_file)
     assert settings.workflow_env == "staging"
     assert settings.server_transport == "sse"
     assert settings.server_host == "0.0.0.0"

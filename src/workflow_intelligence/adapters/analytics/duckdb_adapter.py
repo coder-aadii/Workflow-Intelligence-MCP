@@ -215,7 +215,9 @@ class DuckDBAdapter:
         try:
             safe_path = validate_safe_path(str(path), supported_extensions={".csv"})
         except SecurityError as exc:
-            raise DuckDBAdapterError(f"Security validation failed for CSV file '{path}': {exc}") from exc
+            raise DuckDBAdapterError(
+                f"Security validation failed for CSV file '{path}': {exc}"
+            ) from exc
 
         resolved = str(safe_path)
         safe_table = self._sanitize_table_name(table_name)
@@ -230,9 +232,13 @@ class DuckDBAdapter:
     def register_parquet(self, table_name: str, path: str | Path) -> None:
         """Register a local Parquet file as a read-only DuckDB view."""
         try:
-            safe_path = validate_safe_path(str(path), supported_extensions={".parquet", ".pq"})
+            safe_path = validate_safe_path(
+                str(path), supported_extensions={".parquet", ".pq"}
+            )
         except SecurityError as exc:
-            raise DuckDBAdapterError(f"Security validation failed for Parquet file '{path}': {exc}") from exc
+            raise DuckDBAdapterError(
+                f"Security validation failed for Parquet file '{path}': {exc}"
+            ) from exc
 
         resolved = str(safe_path)
         safe_table = self._sanitize_table_name(table_name)

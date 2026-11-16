@@ -12,23 +12,20 @@ Validates:
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from pathlib import Path
 
-import pandas as pd
 import pytest
 
 from workflow_intelligence.adapters.analytics.duckdb_adapter import (
     DuckDBAdapter,
-    DuckDBAdapterError,
 )
 from workflow_intelligence.adapters.file_storage.loader import (
     FileStorageError,
     load_event_log,
 )
 from workflow_intelligence.schemas.exception import (
-    EscalationResult,
     ExceptionCategory,
-    ResolutionRequest,
     WorkflowInvestigationRequest,
 )
 from workflow_intelligence.schemas.process import (
@@ -36,11 +33,9 @@ from workflow_intelligence.schemas.process import (
     BottleneckRequest,
     ProcessAnalyzeRequest,
 )
-from workflow_intelligence.services.decision_service import DecisionService
 from workflow_intelligence.services.exception_service import ExceptionService
 from workflow_intelligence.services.process_service import (
     ProcessService,
-    ProcessServiceError,
 )
 
 INSURANCE_SAMPLE_URI = "sample-data/insurance_events.csv"
@@ -106,7 +101,7 @@ class TestInsuranceDeterministicAnalytics:
     """Tests DuckDB analytical computation over insurance claims."""
 
     @pytest.fixture
-    def duckdb_adapter(self) -> DuckDBAdapter:
+    def duckdb_adapter(self) -> Generator[DuckDBAdapter, None, None]:
         adapter = DuckDBAdapter()
         yield adapter
         adapter.close()
@@ -156,7 +151,10 @@ class TestInsuranceExceptionResolver:
         )
         res = await exception_service.ainvestigate_failure(req)
         assert res.case_id == "CLM-INS-8001"
-        assert res.category == ExceptionCategory.TRANSIENT_NETWORK_DROP or res.category is not None
+        assert (
+            res.category == ExceptionCategory.TRANSIENT_NETWORK_DROP
+            or res.category is not None
+        )
         assert res.exception_id.startswith("EXC-")
 
     @pytest.mark.asyncio

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import concurrent.futures
-from typing import Any, Callable
-
-from workflow_intelligence.config import get_settings
+import multiprocessing as mp
+import pickle
+import time
+from collections.abc import Callable
+from typing import Any
 
 from workflow_intelligence.adapters.file_storage.loader import (
     FileStorageError,
@@ -16,6 +17,7 @@ from workflow_intelligence.adapters.process_mining.pm4py_adapter import (
     PM4PyAdapter,
     PM4PyAdapterError,
 )
+from workflow_intelligence.config import get_settings
 from workflow_intelligence.schemas.process import (
     AutomationCandidate,
     AutomationScoreReport,
@@ -97,15 +99,53 @@ def _detect_columns(columns: list[str]) -> tuple[str, str, str]:
     return case_id_col, activity_col, timestamp_col
 
 
+MAX_ANALYSIS_RESULT_BYTES: int = 50 * 1024 * 1024  # 50 MB
+
+
+def _terminate_process(p: Any) -> None:
+    """Terminate and join a worker process with escalating SIGTERM -> SIGKILL."""
+    if p is not None and p.is_alive():
+        try:
+            p.terminate()
+            p.join(timeout=0.5)
+            if p.is_alive():
+                p.kill()
+                p.join(timeout=0.2)
+        except Exception:
+            pass
+
+
 def _isolated_analysis_worker(
     conn: Any, fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> None:
     """Worker function executed in an isolated child process via OS Pipe."""
     try:
         res = fn(*args, **kwargs)
-        conn.send(("success", res))
+        # Validate result size before transferring across the Pipe
+        serialized = pickle.dumps(res, protocol=pickle.HIGHEST_PROTOCOL)
+        if len(serialized) > MAX_ANALYSIS_RESULT_BYTES:
+            err = ProcessServiceError(
+                f"Analysis result size ({len(serialized)} bytes) exceeds the maximum "
+                f"allowed payload limit of {MAX_ANALYSIS_RESULT_BYTES} bytes."
+            )
+            conn.send(("error", err))
+        else:
+            conn.send(("success", res))
     except Exception as exc:
-        conn.send(("error", exc))
+        try:
+            conn.send(("error", exc))
+        except Exception as send_err:
+            try:
+                conn.send(
+                    (
+                        "error",
+                        ProcessServiceError(
+                            f"Analysis failed: {exc!s} (serialization error: {send_err!s})"
+                        ),
+                    )
+                )
+            except Exception:
+                pass
     finally:
         try:
             conn.close()
@@ -126,16 +166,15 @@ class ProcessService:
     ) -> Any:
         """Execute an analysis function with OS-level process isolation and timeout guardrail.
 
-        Uses an OS-level Pipe (free of background feeder thread deadlocks) and terminates
-        the worker process immediately upon timeout to prevent unbounded CPU/memory consumption.
-        Never falls back to unkillable threads.
+        Uses an OS-level Pipe (free of background feeder thread deadlocks) and bounds
+        both execution and result transfer within ANALYSIS_TIMEOUT_SECONDS. Terminates
+        the worker process immediately upon timeout or crash to prevent unbounded
+        CPU/memory consumption and resource leakage.
         """
         settings = get_settings()
         timeout = settings.analysis_timeout_seconds
         if not timeout or timeout <= 0:
             return fn(*args, **kwargs)
-
-        import multiprocessing as mp
 
         ctx = mp.get_context("spawn")
         parent_conn, child_conn = ctx.Pipe(duplex=False)
@@ -146,41 +185,70 @@ class ProcessService:
 
         try:
             p.start()
-            # Close child connection in parent process so that EOF is raised if child dies
+            # Close child connection in parent process so EOF is raised if child terminates
             try:
                 child_conn.close()
             except Exception:
                 pass
 
-            # Wait for data on pipe with strict timeout
-            has_data = parent_conn.poll(timeout=timeout)
+            deadline = time.monotonic() + timeout
+            has_data = False
+
+            # Bounded polling loop: monitors pipe data, worker liveness, and timeout deadline
+            while time.monotonic() < deadline:
+                remaining = max(0.01, deadline - time.monotonic())
+                poll_interval = min(0.2, remaining)
+                if parent_conn.poll(timeout=poll_interval):
+                    has_data = True
+                    break
+                if not p.is_alive():
+                    # Child process terminated before returning data
+                    break
+
             if not has_data:
-                # Terminate child process immediately to release CPU and memory
-                if p.is_alive():
-                    p.terminate()
-                    p.join(timeout=0.5)
-                    if p.is_alive():
-                        p.kill()
-                        p.join(timeout=0.2)
+                child_exited_early = not p.is_alive()
+                exit_code = p.exitcode if child_exited_early else None
+
+                _terminate_process(p)
+
+                if child_exited_early and exit_code not in (None, 0):
+                    raise ProcessServiceError(
+                        f"Process mining worker terminated unexpectedly (exit code {exit_code}). "
+                        f"{'Worker process was likely killed by OOM (Out Of Memory).' if exit_code == -9 else 'Worker crashed.'}"
+                    )
                 raise ProcessServiceError(
                     f"Process mining analysis timed out after {timeout} seconds. "
                     "Worker process was terminated to prevent memory or CPU exhaustion."
                 )
 
-            # Receive result from worker
+            # Receive result from worker; handle crash or EOF during transfer
             try:
                 status, payload = parent_conn.recv()
             except EOFError as exc:
+                _terminate_process(p)
+                exit_code = p.exitcode
+                if exit_code is not None and exit_code != 0:
+                    raise ProcessServiceError(
+                        f"Process mining worker terminated unexpectedly (exit code {exit_code}). "
+                        f"{'Worker process was likely killed by OOM (Out Of Memory).' if exit_code == -9 else 'Worker crashed.'}"
+                    ) from exc
                 raise ProcessServiceError(
                     "Process mining worker terminated unexpectedly without returning a result."
                 ) from exc
+
+            # Verify that total execution and result transfer time respected the timeout
+            if time.monotonic() > deadline:
+                _terminate_process(p)
+                raise ProcessServiceError(
+                    f"Process mining analysis and transfer timed out after {timeout} seconds. "
+                    "Worker process was terminated."
+                )
 
             p.join(timeout=1.0)
             if status == "error":
                 raise payload
             return payload
         finally:
-            # Absolute guarantee: no child process is left running or orphaned
             try:
                 parent_conn.close()
             except Exception:
@@ -189,15 +257,7 @@ class ProcessService:
                 child_conn.close()
             except Exception:
                 pass
-            if p.is_alive():
-                try:
-                    p.terminate()
-                    p.join(timeout=0.5)
-                    if p.is_alive():
-                        p.kill()
-                        p.join(timeout=0.2)
-                except Exception:
-                    pass
+            _terminate_process(p)
             try:
                 p.close()
             except Exception:
@@ -207,7 +267,10 @@ class ProcessService:
         self, request: ProcessAnalyzeRequest
     ) -> ProcessAnalysisResult:
         """Analyze a business process event log and reconstruct execution paths."""
-        return self._run_with_timeout(self._analyze_business_process_impl, request)
+        res: ProcessAnalysisResult = self._run_with_timeout(
+            self._analyze_business_process_impl, request
+        )
+        return res
 
     def _analyze_business_process_impl(
         self, request: ProcessAnalyzeRequest

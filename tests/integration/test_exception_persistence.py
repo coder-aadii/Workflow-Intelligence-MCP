@@ -27,7 +27,6 @@ from workflow_intelligence.persistence.database import (
 from workflow_intelligence.persistence.repositories import (
     AuditRepository,
     ExceptionRepository,
-    WorkflowRepository,
 )
 from workflow_intelligence.schemas.common import SeverityLevel
 from workflow_intelligence.schemas.exception import (
@@ -36,7 +35,6 @@ from workflow_intelligence.schemas.exception import (
 )
 from workflow_intelligence.services.exception_service import (
     ExceptionService,
-    sanitize_payload,
 )
 
 TEST_DB_PATH = Path("/tmp") / f"test_exception_lifecycle_{uuid.uuid4().hex[:8]}.db"
@@ -226,7 +224,7 @@ class TestPersistentExceptionLifecycle:
         async def _mock_failing_session() -> AsyncGenerator[AsyncSession, None]:
             raise ConnectionRefusedError("Simulated database outage")
             if False:  # pragma: no cover
-                yield None  # type: ignore[unreachable]
+                yield None
 
         monkeypatch.setattr(
             "workflow_intelligence.services.exception_service.get_db_session",

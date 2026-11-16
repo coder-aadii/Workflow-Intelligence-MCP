@@ -4,10 +4,10 @@ network auth, production database failure modes, and concurrency.
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -24,7 +24,7 @@ from workflow_intelligence.adapters.file_storage.loader import (
     FileStorageError,
     load_event_log,
 )
-from workflow_intelligence.config import Settings, get_settings
+from workflow_intelligence.config import Settings
 from workflow_intelligence.persistence.database import (
     drop_all,
     get_db_session,
@@ -32,6 +32,10 @@ from workflow_intelligence.persistence.database import (
     reset_engine,
 )
 from workflow_intelligence.persistence.repositories import ExceptionRepository
+from workflow_intelligence.schemas.exception import (
+    ResolutionRequest,
+    WorkflowInvestigationRequest,
+)
 from workflow_intelligence.security.auth import StaticTokenVerifier
 from workflow_intelligence.security.file_validator import (
     SecurityError,
@@ -40,10 +44,6 @@ from workflow_intelligence.security.file_validator import (
 from workflow_intelligence.services.exception_service import (
     ExceptionService,
     ExceptionServiceError,
-)
-from workflow_intelligence.schemas.exception import (
-    ResolutionRequest,
-    WorkflowInvestigationRequest,
 )
 
 TEST_DB_PATH = Path("/tmp") / f"test_sec_{uuid.uuid4().hex[:8]}.db"
@@ -89,7 +89,10 @@ class TestFilePathSecurity:
         for sensitive in [".env", "id_rsa", "passwd", "shadow"]:
             with pytest.raises(SecurityError) as exc_info:
                 validate_safe_path(sensitive)
-            assert "sensitive" in str(exc_info.value).lower() or "denied" in str(exc_info.value).lower()
+            assert (
+                "sensitive" in str(exc_info.value).lower()
+                or "denied" in str(exc_info.value).lower()
+            )
 
     def test_hidden_directory_blocked(self) -> None:
         """Rejects access to paths inside hidden directories."""
@@ -229,9 +232,9 @@ class TestProductionDatabaseFailureSecurity:
             return_value=prod_settings,
         ):
             # Simulate DB connection failure
-            async def failing_session():
+            async def failing_session() -> AsyncGenerator[Any, None]:
                 raise ConnectionRefusedError("PostgreSQL connection refused")
-                yield  # noqa: unreachable
+                yield  # noqa
 
             with patch(
                 "workflow_intelligence.services.exception_service.get_db_session",
@@ -255,7 +258,8 @@ class TestProductionDatabaseFailureSecurity:
             "workflow_intelligence.services.exception_service.get_settings",
             return_value=prod_settings,
         ):
-            async def failing_session():
+
+            async def failing_session() -> AsyncGenerator[Any, None]:
                 raise ConnectionRefusedError("PostgreSQL connection refused")
                 yield
 
@@ -276,7 +280,8 @@ class TestProductionDatabaseFailureSecurity:
             "workflow_intelligence.services.exception_service.get_settings",
             return_value=prod_settings,
         ):
-            async def failing_session():
+
+            async def failing_session() -> AsyncGenerator[Any, None]:
                 raise ConnectionRefusedError("PostgreSQL connection refused")
                 yield
 
@@ -340,7 +345,9 @@ class TestConcurrentExceptionOperations:
         assert first_res["status"] == "resolved"
 
         # Duplicate resolution attempt
-        second_res = await service.aresolve_exception(inv.exception_id, "Second resolve")
+        second_res = await service.aresolve_exception(
+            inv.exception_id, "Second resolve"
+        )
         assert second_res["status"] == "already_resolved"
 
     @pytest.mark.asyncio
@@ -368,7 +375,9 @@ class TestConcurrentExceptionOperations:
                 side_effect=RuntimeError("Simulated audit disk failure"),
             ):
                 with pytest.raises(ExceptionServiceError) as exc_info:
-                    await service.aresolve_exception(inv.exception_id, "Failing resolution")
+                    await service.aresolve_exception(
+                        inv.exception_id, "Failing resolution"
+                    )
                 assert "resolution failure" in str(exc_info.value).lower()
 
         # Verify that because transaction rolled back, the record remains UNRESOLVED

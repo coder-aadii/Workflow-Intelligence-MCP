@@ -69,6 +69,7 @@ def get_default_allowed_directories() -> list[Path]:
     # Under pytest/testing, allow the system temp directory so unit fixtures (tmp_path) work
     if os.environ.get("PYTEST_CURRENT_TEST") and settings.workflow_env != "production":
         import tempfile
+
         try:
             allowed.append(Path(tempfile.gettempdir()).resolve())
         except Exception:
@@ -76,9 +77,9 @@ def get_default_allowed_directories() -> list[Path]:
 
     # Deduplicate while preserving order
     unique_allowed: list[Path] = []
-    for d in allowed:
-        if d not in unique_allowed:
-            unique_allowed.append(d)
+    for dir_path in allowed:
+        if dir_path not in unique_allowed:
+            unique_allowed.append(dir_path)
 
     return unique_allowed
 
@@ -125,7 +126,9 @@ def validate_safe_path(
     # 2. Block sensitive filenames and hidden files
     filename = raw_path.name.lower()
     if filename in BLOCKED_FILENAMES or filename.startswith("."):
-        raise SecurityError(f"Access to sensitive or hidden file '{filename}' is denied.")
+        raise SecurityError(
+            f"Access to sensitive or hidden file '{filename}' is denied."
+        )
 
     for part in raw_path.parts:
         if part.startswith(".") and part != ".":
