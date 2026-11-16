@@ -267,6 +267,102 @@ class TestAutomationScoringAccuracy:
         assert all(hasattr(t, "transition_count") for t in res.transitions)
         assert sum(res.activity_frequencies.values()) == res.total_events
 
+    def test_law_of_total_variance_combines_within_and_between_variance(
+        self, monkeypatch: pytest.MonkeyPatch, process_service: ProcessService
+    ) -> None:
+        """Verifies combined weighted variance satisfies Eve's Law:
+        Var = sum(n_i * (sigma_i^2 + (mu_i - mu_bar)^2)) / sum(n_i).
+        """
+        analysis = ProcessAnalysisResult(
+            total_cases=100,
+            total_events=200,
+            unique_activities=["Branching Activity", "Target A", "Target B"],
+            variant_count=2,
+            top_variants=[],
+            average_case_duration_hours=10.0,
+            activity_frequencies={
+                "Branching Activity": 100,
+                "Target A": 60,
+                "Target B": 40,
+            },
+            transitions=[
+                StageMetric(
+                    source_activity="Branching Activity",
+                    target_activity="Target A",
+                    transition_count=60,
+                    mean_duration_hours=2.0,  # 120 min
+                    median_duration_hours=2.0,
+                    std_dev_hours=0.5,  # 30 min
+                    is_bottleneck=False,
+                ),
+                StageMetric(
+                    source_activity="Branching Activity",
+                    target_activity="Target B",
+                    transition_count=40,
+                    mean_duration_hours=5.0,  # 300 min
+                    median_duration_hours=5.0,
+                    std_dev_hours=1.0,  # 60 min
+                    is_bottleneck=False,
+                ),
+            ],
+        )
+        monkeypatch.setattr(
+            process_service, "analyze_business_process", lambda req: analysis
+        )
+        report = process_service.score_automation_opportunities(
+            AutomationScoreRequest(source_uri=str(PROCUREMENT_CSV), min_frequency=1)
+        )
+        cand = next(
+            c for c in report.candidates if c.activity_name == "Branching Activity"
+        )
+
+        # Expected:
+        # n1 = 60, mu1 = 120 min, sigma1 = 30 min (var1 = 900)
+        # n2 = 40, mu2 = 300 min, sigma2 = 60 min (var2 = 3600)
+        # overall_mean = (60*120 + 40*300) / 100 = 192.0 min
+        # between1 = (120 - 192)^2 = 5184
+        # between2 = (300 - 192)^2 = 11664
+        # var_total = (60 * (900 + 5184) + 40 * (3600 + 11664)) / 100 = 9756.0 min^2
+        # std_total = sqrt(9756.0) = 98.772465799... min
+        expected_mean = 192.0
+        expected_std = (9756.0) ** 0.5
+        assert round(cand.avg_duration_minutes, 2) == round(expected_mean, 2)
+        assert round(cand.standard_deviation_minutes, 2) == round(expected_std, 2)
+
+    def test_single_transition_uses_transition_std_dev(
+        self, monkeypatch: pytest.MonkeyPatch, process_service: ProcessService
+    ) -> None:
+        """Single transition activity must preserve its within-transition standard deviation."""
+        analysis = ProcessAnalysisResult(
+            total_cases=50,
+            total_events=100,
+            unique_activities=["Single Step", "End"],
+            variant_count=1,
+            top_variants=[],
+            average_case_duration_hours=1.0,
+            activity_frequencies={"Single Step": 50, "End": 50},
+            transitions=[
+                StageMetric(
+                    source_activity="Single Step",
+                    target_activity="End",
+                    transition_count=50,
+                    mean_duration_hours=1.5,  # 90 min
+                    median_duration_hours=1.5,
+                    std_dev_hours=0.25,  # 15 min
+                    is_bottleneck=False,
+                ),
+            ],
+        )
+        monkeypatch.setattr(
+            process_service, "analyze_business_process", lambda req: analysis
+        )
+        report = process_service.score_automation_opportunities(
+            AutomationScoreRequest(source_uri=str(PROCUREMENT_CSV), min_frequency=1)
+        )
+        cand = next(c for c in report.candidates if c.activity_name == "Single Step")
+        assert round(cand.avg_duration_minutes, 2) == 90.0
+        assert round(cand.standard_deviation_minutes, 2) == 15.0
+
 
 class TestBottleneckReliabilityAndFiltering:
     """Verifies bottleneck z-score calculation, sample size warnings, and min_frequency threshold."""
@@ -370,8 +466,12 @@ class TestInsuranceDatasetVerification:
             c.activity_name: c.automation_potential_score for c in report.candidates
         }
         assert scores["Assign Claim"] < 50.0
-        assert scores["Claim Decision"] < 20.0
-        assert scores["Payment Sent"] < 20.0
+        assert scores["Claim Decision"] < 50.0
+        assert scores["Payment Sent"] < 50.0
+        assert scores["Close Claim"] < 20.0
+        # FNOL remains top candidate with 100.0
+        assert report.candidates[0].activity_name == "First Notification of Loss (FNOL)"
+        assert report.candidates[-1].activity_name == "Close Claim"
 
     def test_insurance_bottleneck_calculations_and_warnings(
         self, process_service: ProcessService

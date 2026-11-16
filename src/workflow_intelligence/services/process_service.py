@@ -523,7 +523,7 @@ class ProcessService:
             if freq < request.min_frequency:
                 continue
 
-            # Prefer outgoing transitions for stage duration and variance;
+            # Prefer outgoing transitions for stage duration;
             # fall back to incoming transitions if the activity is terminal.
             trans_list = outgoing_transitions.get(activity, [])
             if not trans_list:
@@ -531,6 +531,7 @@ class ProcessService:
 
             total_weight = sum(t.transition_count for t in trans_list)
             if total_weight > 0:
+                # Weighted average of mean durations across transitions
                 avg_minutes = (
                     sum(
                         t.transition_count * t.mean_duration_hours * 60.0
@@ -538,15 +539,19 @@ class ProcessService:
                     )
                     / total_weight
                 )
-                variance_minutes = (
-                    sum(
-                        t.transition_count
-                        * ((t.mean_duration_hours * 60.0) - avg_minutes) ** 2
-                        for t in trans_list
+                # Compute combined standard deviation across transitions using the
+                # Law of Total Variance (Eve's Law), capturing both within-transition
+                # variance (sigma_i^2) and between-transition mean differences ((mu_i - mu_bar)^2):
+                #   Var = sum(n_i * (sigma_i^2 + (mu_i - mu_bar)^2)) / sum(n_i)
+                variance_sum = sum(
+                    t.transition_count
+                    * (
+                        ((t.std_dev_hours * 60.0) ** 2)
+                        + (((t.mean_duration_hours * 60.0) - avg_minutes) ** 2)
                     )
-                    / total_weight
+                    for t in trans_list
                 )
-                std_minutes = variance_minutes**0.5
+                std_minutes = (variance_sum / total_weight) ** 0.5
             else:
                 avg_minutes = 0.0
                 std_minutes = 0.0
