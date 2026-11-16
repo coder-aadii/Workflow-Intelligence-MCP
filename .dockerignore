@@ -1,0 +1,57 @@
+# ==============================================================================
+# Workflow Intelligence MCP — .dockerignore
+# ==============================================================================
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Git repository metadata
+.git/
+.gitignore
+
+# Large local benchmark data & scratch (e.g. BPIC19 dataset in local/)
+local/
+scratch/
+
+# Python cache & build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Testing & quality caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Logs & temporary runtime databases
+*.log
+logs/
+*.duckdb
+*.duckdb.wal
+*.sqlite
+*.sqlite3
+*.db
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# IDE & Editor files
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+*~

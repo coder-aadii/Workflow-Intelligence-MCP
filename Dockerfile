@@ -1,16 +1,17 @@
 # ---------------------------------------------------------------
-# Multi-stage Dockerfile for Workflow Intelligence MCP (v1.0.0)
+# Multi-stage Dockerfile for Workflow Intelligence MCP
 #
-# Stage 1 (builder): compile wheels and install production + dev
-#   dependencies into an isolated target directory.
-# Stage 2 (runtime): minimal distroless/slim image containing only
+# Stage 1 (builder): compile wheels and install production
+#   dependencies non-editable into an isolated virtual environment.
+# Stage 2 (runtime): minimal slim image containing only
 #   production dependencies, running as a non-root user.
 #
 # Build:
 #   docker build -t workflow-intelligence-mcp:latest .
 #
-# Run (STDIO, default):
-#   docker run --rm workflow-intelligence-mcp:latest
+# Run (STDIO, default CLI):
+#   docker run -i --rm -e SERVER_TRANSPORT=stdio \
+#     workflow-intelligence-mcp:latest --transport stdio
 #
 # Run (SSE over HTTP):
 #   docker run --rm -p 8000:8000 \
@@ -28,24 +29,21 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:$PATH"
 
-# Install build tooling + hatchling for wheel compilation.
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip setuptools wheel hatchling
 
 WORKDIR /src
 
-# Copy dependency manifest first to leverage Docker layer caching.
-COPY pyproject.toml ./
+# Copy package manifest, documentation, and source code required for non-editable build
+COPY pyproject.toml README.md ./
+COPY src/ ./src/
 
-# Install production + dev dependencies into the venv.
+# Non-editable production installation into the virtual environment
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -e ".[dev]"
+    pip install .
 
-# Copy the rest of the source.
-COPY . /src
-
-# Run a lightweight import smoke test to catch missing modules early.
-RUN python -c "import workflow_intelligence; print('import ok', workflow_intelligence.__version__)"
+# Import smoke test in builder
+RUN python -c "import workflow_intelligence; print('Installed workflow_intelligence', workflow_intelligence.__version__)"
 
 
 # ---- Stage 2: runtime -------------------------------------------------
@@ -60,27 +58,37 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SERVER_PORT=8000 \
     LOG_LEVEL=INFO
 
-# Non-root user for least-privilege execution.
-RUN groupadd -r appuser && useradd -r -g appuser -m -s /bin/sh appuser
+# Least-privilege non-root execution user and group
+RUN groupadd -r -g 10001 appuser \
+    && useradd -r -u 10001 -g appuser -m -d /home/appuser -s /bin/sh appuser
 
-# Copy the virtualenv (with installed packages) from the builder stage.
+# Copy virtual environment from builder stage
 COPY --from=builder /opt/venv /opt/venv
 
-# Copy only the application source (not tests, docs, local, etc.).
 WORKDIR /app
-COPY --from=builder /src/src /app/src
-COPY --from=builder /src/pyproject.toml /app/pyproject.toml
-COPY --from=builder /src/README.md /app/README.md
-COPY --from=builder /src/sample-data /app/sample-data
-COPY --from=builder /src/demo /app/demo
 
-# Healthcheck: verify the server module imports and responds over STDIO.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import workflow_intelligence.server; print('healthy')" \
-        || exit 1
+# Ensure application and persistent data directories exist and are owned by appuser
+RUN mkdir -p /app/data \
+    && chown -R appuser:appuser /app
+
+# Copy application resources with non-root ownership
+COPY --chown=appuser:appuser sample-data /app/sample-data
+COPY --chown=appuser:appuser demo /app/demo
+COPY --chown=appuser:appuser pyproject.toml /app/pyproject.toml
+COPY --chown=appuser:appuser README.md /app/README.md
 
 USER appuser
 
-# Entrypoint: run the MCP server over SSE by default in containers.
+# Reliable health check: validates SSE readiness probe when in SSE transport; validates import in STDIO
+HEALTHCHECK --interval=15s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import os, sys, urllib.request; \
+transport = os.environ.get('SERVER_TRANSPORT', 'sse').strip().lower(); \
+if transport == 'stdio': sys.exit(0); \
+port = os.environ.get('SERVER_PORT', '8000').strip(); \
+req = urllib.request.Request(f'http://127.0.0.1:{port}/ready'); \
+resp = urllib.request.urlopen(req, timeout=3); \
+sys.exit(0 if resp.status == 200 else 1)" || exit 1
+
+# Entrypoint: run the FastMCP server
 ENTRYPOINT ["python", "-m", "workflow_intelligence.server"]
-CMD ["--transport", "sse", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["--transport", "unified", "--host", "0.0.0.0", "--port", "8000"]

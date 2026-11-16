@@ -7,6 +7,11 @@ from typing import cast
 
 import pandas as pd
 
+from workflow_intelligence.security.file_validator import (
+    SecurityError,
+    validate_safe_path,
+)
+
 try:  # pm4py is optional; only needed for OCEL files
     import pm4py
 except ImportError:  # pragma: no cover - pm4py optional
@@ -22,34 +27,22 @@ SUPPORTED_EXTENSIONS = {".csv", ".json", ".parquet", ".pq", ".ocel", ".jsonocel"
 
 
 def _resolve_and_validate_path(source_uri: str) -> Path:
-    """Resolve a source URI to a safe local path and prevent path traversal.
+    """Resolve a source URI to a safe local path and enforce security boundaries.
 
     Args:
         source_uri: File path or URI to resolve.
 
     Returns:
-        Resolved Path object.
+        Resolved and canonicalized Path object.
 
     Raises:
-        FileStorageError: If the path contains parent-directory references,
-            escapes the allowed root, or does not exist.
+        FileStorageError: If path traversal, sensitive file access, unauthorized directory,
+            unsupported format, or size limits are violated, or if file does not exist.
     """
-    # Security: check for parent-directory traversal on the RAW input path
-    # BEFORE calling .resolve(), which canonicalizes ".." components and
-    # would otherwise hide them from .parts inspection.
-    if ".." in Path(source_uri).parts:
-        raise FileStorageError(
-            "Path traversal detected: '"
-            + source_uri
-            + "' contains parent-directory references."
-        )
-
-    resolved = Path(source_uri).expanduser().resolve()
-
-    if not resolved.exists():
-        raise FileStorageError(f"Event log file not found: {resolved}")
-
-    return resolved
+    try:
+        return validate_safe_path(source_uri)
+    except SecurityError as exc:
+        raise FileStorageError(str(exc)) from exc
 
 
 def _load_ocel(path: Path) -> pd.DataFrame:

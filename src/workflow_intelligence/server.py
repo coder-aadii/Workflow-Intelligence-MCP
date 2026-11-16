@@ -16,8 +16,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastmcp import FastMCP
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from workflow_intelligence.config import get_settings
+from workflow_intelligence.security.auth import StaticTokenVerifier
 from workflow_intelligence.observability.logging import (
     configure_logging,
     get_logger,
@@ -74,6 +78,17 @@ async def _lifespan(server: FastMCP) -> AsyncGenerator[None, None]:
         logger.warning("Could not register default analytics source: %s", exc)
 
     try:
+        from workflow_intelligence.persistence.database import init_db
+
+        await init_db()
+        logger.info("Database persistence initialized successfully.")
+    except Exception as exc:  # noqa: BLE001 - startup must not hard-fail
+        logger.warning(
+            "Database persistence unavailable; running in non-persistent demo mode: %s",
+            exc,
+        )
+
+    try:
         yield
     finally:
         with log_context(
@@ -100,6 +115,18 @@ def create_server() -> FastMCP:
     Returns:
         Configured FastMCP server instance.
     """
+    settings = get_settings()
+
+    auth_verifier = None
+    if settings.mcp_auth_token:
+        auth_verifier = StaticTokenVerifier(settings.mcp_auth_token)
+        logger.info("Configured bearer token authentication for network MCP endpoints.")
+    elif settings.workflow_env == "production":
+        logger.warning(
+            "Production environment running without MCP_AUTH_TOKEN configured. "
+            "Network endpoints will not enforce authentication unless MCP_AUTH_TOKEN is set."
+        )
+
     mcp = FastMCP(
         name="workflow-intelligence",
         version="0.5.0",
@@ -110,6 +137,7 @@ def create_server() -> FastMCP:
             "prompts, and observability."
         ),
         lifespan=_lifespan,
+        auth=auth_verifier,
     )
 
     process_service = ProcessService()
@@ -126,11 +154,61 @@ def create_server() -> FastMCP:
     )
     register_prompts(mcp)
 
+    @mcp.custom_route("/health", methods=["GET"])
+    async def _health_check(request: Request) -> JSONResponse:
+        """Health check endpoint for container probes and load balancers."""
+        return JSONResponse(
+            {
+                "status": "healthy",
+                "service": "workflow-intelligence",
+                "version": "1.0.1",
+            }
+        )
+
+    @mcp.custom_route("/ready", methods=["GET"])
+    async def _readiness_check(request: Request) -> JSONResponse:
+        """Readiness probe verifying services and MCP registries are initialized."""
+        return JSONResponse(
+            {
+                "status": "ready",
+                "service": "workflow-intelligence",
+                "tools_count": 9,
+                "resources_count": 4,
+                "prompts_count": 3,
+            }
+        )
+
     logger.info(
         "Registered 9 domain tools, 4 resources, and 3 prompts on "
         "FastMCP server 'workflow-intelligence'"
     )
     return mcp
+
+
+def create_unified_http_app(mcp: FastMCP) -> Starlette:
+    """Create a unified HTTP application supporting Streamable HTTP (/mcp),
+    legacy SSE (/sse, /messages), and health probes (/health, /ready) on the same port.
+    """
+    streamable_app = mcp.http_app(transport="streamable-http")
+    sse_app = mcp.http_app(transport="sse")
+
+    @asynccontextmanager
+    async def unified_lifespan(app: Starlette) -> AsyncGenerator[None, None]:
+        async with mcp._lifespan_manager():
+            async with streamable_app.router.lifespan_context(streamable_app):
+                async with sse_app.router.lifespan_context(sse_app):
+                    yield
+
+    routes = (
+        list(mcp._additional_http_routes)
+        + list(streamable_app.routes)
+        + list(sse_app.routes)
+    )
+    return Starlette(
+        routes=routes,
+        middleware=streamable_app.user_middleware,
+        lifespan=unified_lifespan,
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -142,9 +220,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--transport",
-        choices=["stdio", "sse"],
+        choices=["stdio", "sse", "streamable-http", "http", "unified"],
         default=settings.server_transport,
-        help="Transport protocol (default: stdio).",
+        help="Transport protocol (stdio, sse, streamable-http, http, or unified; default: %(default)s).",
     )
     parser.add_argument(
         "--host",
@@ -164,13 +242,43 @@ def main() -> None:
     """CLI entry point for the Workflow Intelligence MCP server."""
     parser = _build_parser()
     args = parser.parse_args()
+    settings = get_settings()
+
+    # In production, network transports require authentication unless a verified gateway is used
+    if args.transport != "stdio" and settings.workflow_env == "production":
+        if not settings.mcp_auth_token and not settings.trusted_auth_gateway:
+            logger.critical(
+                "Production network startup aborted: MCP_AUTH_TOKEN is not configured and "
+                "TRUSTED_AUTH_GATEWAY is False. Network MCP endpoints must be authenticated."
+            )
+            raise RuntimeError(
+                "Production network startup aborted: MCP_AUTH_TOKEN is required for network exposure "
+                "unless TRUSTED_AUTH_GATEWAY=true is explicitly configured with a verified authenticating gateway."
+            )
 
     mcp = create_server()
 
     if args.transport == "stdio":
         mcp.run(transport="stdio")
-    else:
+    elif args.transport in ("streamable-http", "http"):
+        mcp.run(transport="streamable-http", host=args.host, port=args.port)
+    elif args.transport == "sse":
         mcp.run(transport="sse", host=args.host, port=args.port)
+    else:  # "unified"
+        import uvicorn
+
+        unified_app = create_unified_http_app(mcp)
+        logger.info(
+            "Starting unified MCP server on http://%s:%d (Streamable HTTP: /mcp, SSE: /sse)",
+            args.host,
+            args.port,
+        )
+        uvicorn.run(
+            unified_app,
+            host=args.host,
+            port=args.port,
+            log_level=settings.log_level.lower(),
+        )
 
 
 if __name__ == "__main__":

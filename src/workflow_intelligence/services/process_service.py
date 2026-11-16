@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import concurrent.futures
+from typing import Any, Callable
+
+from workflow_intelligence.config import get_settings
+
 from workflow_intelligence.adapters.file_storage.loader import (
     FileStorageError,
     get_event_log_columns,
@@ -92,6 +97,17 @@ def _detect_columns(columns: list[str]) -> tuple[str, str, str]:
     return case_id_col, activity_col, timestamp_col
 
 
+def _isolated_analysis_worker(
+    queue: Any, fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any]
+) -> None:
+    """Worker function executed in an isolated child process."""
+    try:
+        res = fn(*args, **kwargs)
+        queue.put(("success", res))
+    except Exception as exc:
+        queue.put(("error", exc))
+
+
 class ProcessService:
     """Service for process discovery, bottleneck detection, and automation scoring."""
 
@@ -100,20 +116,72 @@ class ProcessService:
         self._columns = get_event_log_columns
         self._pm4py = PM4PyAdapter()
 
+    def _run_with_timeout(
+        self, fn: Callable[..., Any], *args: Any, **kwargs: Any
+    ) -> Any:
+        """Execute an analysis function with OS-level process isolation and timeout guardrail.
+
+        Terminates the worker process immediately upon timeout to prevent unbounded CPU/memory consumption.
+        """
+        settings = get_settings()
+        timeout = settings.analysis_timeout_seconds
+        if not timeout or timeout <= 0:
+            return fn(*args, **kwargs)
+
+        import multiprocessing as mp
+
+        try:
+            ctx = mp.get_context("spawn")
+            q = ctx.Queue()
+            p = ctx.Process(
+                target=_isolated_analysis_worker,
+                args=(q, fn, args, kwargs),
+            )
+            p.start()
+            p.join(timeout=timeout)
+            if p.is_alive():
+                p.terminate()
+                p.join(timeout=0.5)
+                if p.is_alive():
+                    p.kill()
+                    p.join(timeout=0.2)
+                raise ProcessServiceError(
+                    f"Process mining analysis timed out after {timeout} seconds. "
+                    "Worker process was terminated to prevent memory or CPU exhaustion."
+                )
+
+            if q.empty():
+                raise ProcessServiceError(
+                    "Process mining worker exited abnormally without returning a result."
+                )
+
+            status, payload = q.get(timeout=1.0)
+            if status == "error":
+                raise payload
+            return payload
+        except ProcessServiceError:
+            raise
+        except Exception:
+            # Fallback to ThreadPoolExecutor if OS forbids forking
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(fn, *args, **kwargs)
+                try:
+                    return future.result(timeout=timeout)
+                except concurrent.futures.TimeoutError as exc:
+                    raise ProcessServiceError(
+                        f"Process mining analysis timed out after {timeout} seconds."
+                    ) from exc
+
     def analyze_business_process(
         self, request: ProcessAnalyzeRequest
     ) -> ProcessAnalysisResult:
-        """Analyze a business process event log and reconstruct execution paths.
+        """Analyze a business process event log and reconstruct execution paths."""
+        return self._run_with_timeout(self._analyze_business_process_impl, request)
 
-        Args:
-            request: Process analysis request with source URI and column names.
-
-        Returns:
-            ProcessAnalysisResult with case statistics, variants, and transitions.
-
-        Raises:
-            ProcessServiceError: If loading or mining fails.
-        """
+    def _analyze_business_process_impl(
+        self, request: ProcessAnalyzeRequest
+    ) -> ProcessAnalysisResult:
+        """Reconstruct execution paths from an event log."""
         try:
             df = self._loader(
                 source_uri=request.source_uri,

@@ -59,14 +59,18 @@ class ExceptionRepository(BaseRepository[ExceptionRecord]):
         category: str,
         root_cause: str,
         payload: dict[str, Any] | None = None,
+        item_id: str | None = None,
     ) -> ExceptionRecord:
         """Create and persist a new exception record."""
-        return await self.create(
-            workflow_id=workflow_id,
-            category=category,
-            root_cause=root_cause,
-            payload=payload,
-        )
+        attrs: dict[str, Any] = {
+            "workflow_id": workflow_id,
+            "category": category,
+            "root_cause": root_cause,
+            "payload": payload,
+        }
+        if item_id is not None:
+            attrs["id"] = item_id
+        return await self.create(**attrs)
 
     async def mark_resolved(self, item_id: str) -> ExceptionRecord | None:
         """Mark an exception record as resolved with the current timestamp."""

@@ -1,18 +1,16 @@
 # ---------------------------------------------------------------
-# docker-compose.yml — Workflow Intelligence MCP (v1.0.0)
+# docker-compose.yml — Workflow Intelligence MCP Production Stack
 #
 # Multi-container stack:
-#   - workflow-intelligence-mcp : core MCP server (SSE on port 8000)
-#   - postgres                  : PostgreSQL 16 persistence
-#   - redis                     : Redis 7 alpine cache
+#   - workflow-intelligence-mcp : core FastMCP server (SSE on port 8000)
+#   - postgres                  : PostgreSQL 16 persistence (internal network only)
+#   - redis                     : Redis 7 alpine cache (internal network only)
 #
-# Named volumes provide data persistence across container restarts.
-# `depends_on: condition: service_healthy` enforces startup ordering.
-#
-# Run:
-#   docker compose up -d
-#
-# The MCP server is reachable at http://localhost:8000 (SSE transport).
+# Security & Operational Standards:
+#   - Database and Redis ports are NOT exposed to the host by default.
+#   - All credentials sourced from environment variables with safe dev fallbacks.
+#   - Graceful shutdown periods and healthchecks configured on every service.
+#   - Named volumes provide persistence without data loss.
 # ---------------------------------------------------------------
 
 services:
@@ -23,29 +21,37 @@ services:
       target: runtime
     image: workflow-intelligence-mcp:latest
     container_name: workflow-intelligence-mcp
+    restart: unless-stopped
+    stop_grace_period: 15s
     ports:
-      - "8000:8000"
+      - "${SERVER_PORT:-8000}:8000"
+    command: ["--transport", "unified", "--host", "0.0.0.0", "--port", "8000"]
     environment:
-      - WORKFLOW_ENV=production
-      - SERVER_TRANSPORT=sse
+      - WORKFLOW_ENV=${WORKFLOW_ENV:-production}
+      - SERVER_TRANSPORT=${COMPOSE_SERVER_TRANSPORT:-unified}
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8000
-      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/workflow_intelligence
-      - DUCKDB_PATH=/app/data/procurement_costs.duckdb
-      - REDIS_URL=redis://redis:6379/0
-      - LOG_LEVEL=INFO
+      - DATABASE_URL=${COMPOSE_DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-workflow_intelligence}}
+      - DUCKDB_PATH=${DUCKDB_PATH:-/app/data/procurement_costs.duckdb}
+      - REDIS_URL=${COMPOSE_REDIS_URL:-redis://redis:6379/0}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - MCP_AUTH_TOKEN=${MCP_AUTH_TOKEN:-}
+      - TRUSTED_AUTH_GATEWAY=${TRUSTED_AUTH_GATEWAY:-true}
+      - ANALYSIS_TIMEOUT_SECONDS=${ANALYSIS_TIMEOUT_SECONDS:-60}
+      - QUERY_TIMEOUT_MS=${QUERY_TIMEOUT_MS:-30000}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     volumes:
-      - wimcp-sample-data:/app/sample-data:ro
+      - ./sample-data:/app/sample-data:ro
+      - wimcp-data:/app/data
     healthcheck:
-      test: ["CMD", "python", "-c", "import workflow_intelligence.server; print('healthy')"]
-      interval: 30s
+      test: ["CMD-SHELL", "python -c \"import os, sys, urllib.request; port=os.environ.get('SERVER_PORT', '8000').strip(); req=urllib.request.Request(f'http://127.0.0.1:{port}/ready'); resp=urllib.request.urlopen(req, timeout=3); sys.exit(0 if resp.status == 200 else 1)\""]
+      interval: 15s
       timeout: 5s
-      start_period: 10s
+      start_period: 15s
       retries: 3
     networks:
       - wimcp-network
@@ -53,14 +59,16 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: wimcp-postgres
+    restart: unless-stopped
+    stop_grace_period: 15s
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=workflow_intelligence
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-workflow_intelligence}
     volumes:
       - wimcp-postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d workflow_intelligence"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       start_period: 10s
@@ -71,6 +79,8 @@ services:
   redis:
     image: redis:7-alpine
     container_name: wimcp-redis
+    restart: unless-stopped
+    stop_grace_period: 15s
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - wimcp-redis-data:/data
@@ -86,6 +96,8 @@ services:
 volumes:
   wimcp-postgres-data:
   wimcp-redis-data:
+  wimcp-data:
+  # Retained to ensure existing Docker named volumes are not marked orphaned
   wimcp-sample-data:
 
 networks:

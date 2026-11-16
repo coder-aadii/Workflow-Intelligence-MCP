@@ -300,12 +300,27 @@ cp .env.example .env
 
 ### 3. Running the Server
 
-#### Run via Standard I/O (STDIO)
+#### Option A: Standard I/O (STDIO) — Default for local desktop agents
 ```bash
-python -m workflow_intelligence.server
+python -m workflow_intelligence.server --transport stdio
 ```
 
-#### Run via Streamable HTTP (SSE / Remote)
+#### Option B: Unified Dual-Transport (Streamable HTTP + Legacy SSE) — Recommended for Docker
+```bash
+python -m workflow_intelligence.server --transport unified --port 8000
+```
+This serves:
+- Streamable HTTP endpoint: `POST http://127.0.0.1:8000/mcp`
+- Legacy SSE endpoint: `GET http://127.0.0.1:8000/sse`
+- Health check probe: `GET http://127.0.0.1:8000/health`
+- Readiness probe: `GET http://127.0.0.1:8000/ready`
+
+#### Option C: Standalone Streamable HTTP
+```bash
+python -m workflow_intelligence.server --transport streamable-http --port 8000
+```
+
+#### Option D: Standalone SSE
 ```bash
 python -m workflow_intelligence.server --transport sse --port 8000
 ```
@@ -314,18 +329,48 @@ python -m workflow_intelligence.server --transport sse --port 8000
 
 ## MCP Client Configuration
 
-### Claude Desktop Configuration
-Add the server definition to your `claude_desktop_config.json`:
+### Claude Desktop (STDIO)
+Add the server definition to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "workflow-intelligence": {
       "command": "/path/to/Workflow-Intelligence-MCP/.venv/bin/python",
-      "args": ["-m", "workflow_intelligence.server"],
+      "args": ["-m", "workflow_intelligence.server", "--transport", "stdio"],
       "env": {
         "WORKFLOW_ENV": "development",
         "DATABASE_URL": "postgresql+asyncpg://postgres:postgres@localhost:5432/workflow_intelligence"
+      }
+    }
+  }
+}
+```
+
+### Streamable HTTP Client (Claude Desktop / Remote Agent)
+When running over the network in production with bearer token authentication:
+
+```json
+{
+  "mcpServers": {
+    "workflow-intelligence-remote": {
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": {
+        "Authorization": "Bearer your-secure-mcp-auth-token"
+      }
+    }
+  }
+}
+```
+
+### Legacy SSE Client
+```json
+{
+  "mcpServers": {
+    "workflow-intelligence-sse": {
+      "url": "http://127.0.0.1:8000/sse",
+      "headers": {
+        "Authorization": "Bearer your-secure-mcp-auth-token"
       }
     }
   }
@@ -336,7 +381,7 @@ Add the server definition to your `claude_desktop_config.json`:
 In Cursor's `Features > MCP Servers` settings:
 - **Name:** `workflow-intelligence`
 - **Type:** `command`
-- **Command:** `python -m workflow_intelligence.server`
+- **Command:** `python -m workflow_intelligence.server --transport stdio`
 
 ---
 
@@ -345,13 +390,70 @@ In Cursor's `Features > MCP Servers` settings:
 | Variable | Description | Default |
 |---|---|---|
 | `WORKFLOW_ENV` | Application environment (`development`, `staging`, `production`) | `development` |
-| `SERVER_TRANSPORT` | MCP transport mechanism (`stdio`, `sse`) | `stdio` |
-| `SERVER_HOST` | Host address for SSE transport | `127.0.0.1` |
-| `SERVER_PORT` | Port for SSE transport | `8000` |
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql+asyncpg://postgres:postgres@localhost:5432/workflow_intel` |
+| `SERVER_TRANSPORT` | MCP transport mechanism (`stdio`, `sse`, `streamable-http`, `unified`) | `stdio` |
+| `SERVER_HOST` | Host address for network transports | `127.0.0.1` |
+| `SERVER_PORT` | Port for HTTP transports | `8000` |
+| `MCP_AUTH_TOKEN` | Bearer token for network endpoints (mandatory in production) | `None` |
+| `TRUSTED_AUTH_GATEWAY` | Set `true` if behind an authenticating reverse proxy/ingress | `false` |
+| `ALLOWED_DATA_DIRS` | Comma-separated allowlist of accessible data directories | `sample-data,data,local` |
+| `MAX_FILE_SIZE_BYTES` | Maximum allowable file size before ingestion rejection | `209715200` (200MB) |
+| `ANALYSIS_TIMEOUT_SECONDS` | Timeout for process mining with process-isolated termination | `60.0` |
+| `QUERY_TIMEOUT_MS` | Timeout for analytical DuckDB queries in milliseconds | `30000` (30s) |
+| `DATABASE_URL` | PostgreSQL asyncpg connection string | `postgresql+asyncpg://postgres:postgres@localhost:5432/workflow_intelligence` |
 | `DUCKDB_PATH` | Path to persistent DuckDB file (or `:memory:`) | `:memory:` |
 | `REDIS_URL` | Redis URL for workflow caching | `redis://localhost:6379/0` |
-| `LOG_LEVEL` | Structured logging verbosity (`DEBUG`, `INFO`, `WARNING`) | `INFO` |
+| `LOG_LEVEL` | Structured logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `INFO` |
+
+---
+
+## Real-World Dataset Benchmarks
+
+Workflow-Intelligence-MCP was validated against high-volume, real-world enterprise datasets:
+
+### 1. BPIC19 Flat Event Log (`local/BPIC19_flat.csv`)
+- **Scale:** 1,595,923 events | 251,734 cases | 42 unique activities
+- **Execution Time:** 332.73s (~5.5 min)
+- **Peak RAM:** 1,260.51 MB (~1.26 GB)
+- **Results:** Discovered 11,973 variants and 498 directly-follows transitions.
+- **Resource Safety:** Bounded execution via OS process isolation guarantees that timed-out workloads cannot consume unbounded CPU or leak memory.
+
+### 2. Insurance Claims Event Log (`local/Insurance_claims_event_log.csv`)
+- **Scale:** 180,000 events | 30,000 cases | 6 unique activities
+- **Execution Time:** 55.98s
+- **Peak RAM:** 291.09 MB
+- **Operational Bottleneck Detected:** `First Notification of Loss (FNOL) -> Assign Claim` (avg duration 360.25 hours / 15 days, impacting 29,807 claims / 99.36%).
+- **Automation Potential:** FNOL identified as #1 candidate for RPA/automated ingestion.
+- **DuckDB Analytical Validation:** Aggregated claim amounts across Collision ($5,498.07 avg), Comprehensive ($5,502.13 avg), and Liability ($5,495.59 avg) with zero procurement assumptions.
+
+---
+
+## Operations & Disaster Recovery Runbook
+
+### Health Probes
+- **Liveness Probe:** `GET http://127.0.0.1:8000/health` -> returns `{"status": "healthy"}`
+- **Readiness Probe:** `GET http://127.0.0.1:8000/ready` -> validates DB connectivity and returns `{"status": "ready"}`
+
+### PostgreSQL Backup & Recovery
+```bash
+# Backup database to SQL dump
+docker compose exec -T postgres pg_dump -U postgres workflow_intelligence > wimcp_backup_$(date +%Y%m%d_%H%M%S).sql
+
+# Restore database from backup
+docker compose exec -T postgres psql -U postgres workflow_intelligence < wimcp_backup_20261116.sql
+```
+
+### Rollback Procedure
+If a deployment fails, rollback safely without data loss:
+```bash
+# Graceful stop
+docker compose stop workflow-intelligence-mcp
+
+# Roll back code to pre-hardening tag/checkpoint
+git checkout checkpoint-pre-hardening
+
+# Rebuild and start container
+docker compose up -d --build
+```
 
 ---
 

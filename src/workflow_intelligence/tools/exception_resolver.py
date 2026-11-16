@@ -51,7 +51,7 @@ def register_exception_tools(mcp: FastMCP, service: ExceptionService) -> None:
             workflow_type=workflow_type,
             failure_payload=failure_payload,
         )
-        result = service.investigate_failure(request)
+        result = await service.ainvestigate_failure(request)
         return result.model_dump()
 
     @mcp.tool()
@@ -75,7 +75,7 @@ def register_exception_tools(mcp: FastMCP, service: ExceptionService) -> None:
             exception_id=exception_id,
             policy_context=policy_context,
         )
-        result = service.recommend_resolution(request)
+        result = await service.arecommend_resolution(request)
         return result.model_dump()
 
     @mcp.tool()
@@ -101,7 +101,7 @@ def register_exception_tools(mcp: FastMCP, service: ExceptionService) -> None:
             reason=reason,
             target_department=target_department,
         )
-        result = service.escalate_case(
+        result = await service.aescalate_case(
             case_id=request.case_id,
             reason=request.reason,
             target_department=request.target_department,

@@ -1,0 +1,27 @@
+# ---------------------------------------------------------------
+# docker-compose.dev.yml — Local Development Override
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Adds:
+#   - Local port exposures for PostgreSQL (5432) and Redis (6379)
+#   - Source code live mount for local development
+#   - Debug logging
+# ---------------------------------------------------------------
+
+services:
+  workflow-intelligence-mcp:
+    environment:
+      - WORKFLOW_ENV=development
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ./src/workflow_intelligence:/app/src/workflow_intelligence:ro
+
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"

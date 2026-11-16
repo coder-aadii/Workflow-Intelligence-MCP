@@ -51,13 +51,17 @@ class WorkflowRepository(BaseRepository[WorkflowInstance]):
         workflow_type: str,
         status: str = "pending",
         metadata: dict[str, Any] | None = None,
+        item_id: str | None = None,
     ) -> WorkflowInstance:
         """Create and persist a new workflow instance."""
-        return await self.create(
-            workflow_type=workflow_type,
-            status=status,
-            metadata_json=metadata,
-        )
+        attrs: dict[str, Any] = {
+            "workflow_type": workflow_type,
+            "status": status,
+            "metadata_json": metadata,
+        }
+        if item_id is not None:
+            attrs["id"] = item_id
+        return await self.create(**attrs)
 
     async def update_status(self, item_id: str, status: str) -> WorkflowInstance | None:
         """Update the status of a workflow instance."""

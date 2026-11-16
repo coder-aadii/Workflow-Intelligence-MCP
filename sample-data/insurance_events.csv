@@ -1,0 +1,31 @@
+case_id,activity_name,timestamp,claimant_name,agent_name,adjuster_name,claim_amount,claimant_age,type_of_policy,car_make,car_model,car_year,type_of_accident,user_type
+a626bc58-a7b2-4eff-aca9-2a622cd0c492,First Notification of Loss (FNOL),2020-09-24 14:08:42.423530,Karen Lopez,Thomas Cantu,Ian Garcia,1914.96,75,Collision,Honda,Civic,2012,Rollover,RPA
+a626bc58-a7b2-4eff-aca9-2a622cd0c492,Assign Claim,2020-10-13 03:51:28.627923,Karen Lopez,Thomas Cantu,Ian Garcia,1914.96,75,Collision,Honda,Civic,2012,Rollover,RPA
+a626bc58-a7b2-4eff-aca9-2a622cd0c492,Claim Decision,2020-10-14 22:30:14.948970,Karen Lopez,Thomas Cantu,Ian Garcia,1914.96,75,Collision,Honda,Civic,2012,Rollover,RPA
+a626bc58-a7b2-4eff-aca9-2a622cd0c492,Set Reserve,2020-10-24 11:49:39.053890,Karen Lopez,Thomas Cantu,Ian Garcia,1914.96,75,Collision,Honda,Civic,2012,Rollover,RPA
+a626bc58-a7b2-4eff-aca9-2a622cd0c492,Payment Sent,2020-10-27 05:46:04.378718,Karen Lopez,Thomas Cantu,Ian Garcia,1914.96,75,Collision,Honda,Civic,2012,Rollover,RPA
+a626bc58-a7b2-4eff-aca9-2a622cd0c492,Close Claim,2020-11-06 00:55:19.480774,Karen Lopez,Thomas Cantu,Ian Garcia,1914.96,75,Collision,Honda,Civic,2012,Rollover,RPA
+14286703-b629-477a-9043-0610b928aeec,First Notification of Loss (FNOL),2022-06-16 05:52:40.531612,Mark Walker,Ian Smith,Kara Vincent,1358.64,75,Comprehensive,Toyota,Camry,2010,Rollover,Human
+14286703-b629-477a-9043-0610b928aeec,Assign Claim,2022-07-01 23:42:33.486916,Mark Walker,Ian Smith,Kara Vincent,1358.64,75,Comprehensive,Toyota,Camry,2010,Rollover,Human
+14286703-b629-477a-9043-0610b928aeec,Claim Decision,2022-07-08 00:50:34.659426,Mark Walker,Ian Smith,Kara Vincent,1358.64,75,Comprehensive,Toyota,Camry,2010,Rollover,Human
+14286703-b629-477a-9043-0610b928aeec,Set Reserve,2022-07-15 05:50:33.396651,Mark Walker,Ian Smith,Kara Vincent,1358.64,75,Comprehensive,Toyota,Camry,2010,Rollover,Human
+14286703-b629-477a-9043-0610b928aeec,Payment Sent,2022-07-21 17:49:17.737541,Mark Walker,Ian Smith,Kara Vincent,1358.64,75,Comprehensive,Toyota,Camry,2010,Rollover,Human
+14286703-b629-477a-9043-0610b928aeec,Close Claim,2022-07-27 07:18:48.993619,Mark Walker,Ian Smith,Kara Vincent,1358.64,75,Comprehensive,Toyota,Camry,2010,Rollover,Human
+7213cc33-0b8a-42d6-804a-0fc6df5b1349,First Notification of Loss (FNOL),2022-03-16 10:26:10.302722,Pamela Sawyer,Brianna Lamb,Ashley Joseph,5955.97,51,Liability,Jeep,Wrangler,2013,Side-impact,RPA
+7213cc33-0b8a-42d6-804a-0fc6df5b1349,Assign Claim,2022-03-28 02:41:50.193484,Pamela Sawyer,Brianna Lamb,Ashley Joseph,5955.97,51,Liability,Jeep,Wrangler,2013,Side-impact,RPA
+7213cc33-0b8a-42d6-804a-0fc6df5b1349,Claim Decision,2022-04-04 12:25:12.133655,Pamela Sawyer,Brianna Lamb,Ashley Joseph,5955.97,51,Liability,Jeep,Wrangler,2013,Side-impact,RPA
+7213cc33-0b8a-42d6-804a-0fc6df5b1349,Set Reserve,2022-04-09 17:03:42.260412,Pamela Sawyer,Brianna Lamb,Ashley Joseph,5955.97,51,Liability,Jeep,Wrangler,2013,Side-impact,RPA
+7213cc33-0b8a-42d6-804a-0fc6df5b1349,Payment Sent,2022-04-15 08:00:09.369184,Pamela Sawyer,Brianna Lamb,Ashley Joseph,5955.97,51,Liability,Jeep,Wrangler,2013,Side-impact,RPA
+7213cc33-0b8a-42d6-804a-0fc6df5b1349,Close Claim,2022-04-19 16:33:43.419149,Pamela Sawyer,Brianna Lamb,Ashley Joseph,5955.97,51,Liability,Jeep,Wrangler,2013,Side-impact,RPA
+e3fb0c8a-a386-479d-aba9-e9f3def1a9fe,First Notification of Loss (FNOL),2020-12-18 16:19:42.229263,Rebecca Smith,Chad Thornton,Elizabeth Phillips,1533.96,75,Collision,Chevrolet,Silverado,2019,Side-impact,Human
+e3fb0c8a-a386-479d-aba9-e9f3def1a9fe,Assign Claim,2020-12-30 04:22:47.841475,Rebecca Smith,Chad Thornton,Elizabeth Phillips,1533.96,75,Collision,Chevrolet,Silverado,2019,Side-impact,Human
+e3fb0c8a-a386-479d-aba9-e9f3def1a9fe,Claim Decision,2021-01-03 16:03:53.768946,Rebecca Smith,Chad Thornton,Elizabeth Phillips,1533.96,75,Collision,Chevrolet,Silverado,2019,Side-impact,Human
+e3fb0c8a-a386-479d-aba9-e9f3def1a9fe,Set Reserve,2021-01-07 08:20:47.583120,Rebecca Smith,Chad Thornton,Elizabeth Phillips,1533.96,75,Collision,Chevrolet,Silverado,2019,Side-impact,Human
+e3fb0c8a-a386-479d-aba9-e9f3def1a9fe,Payment Sent,2021-01-13 21:15:38.310782,Rebecca Smith,Chad Thornton,Elizabeth Phillips,1533.96,75,Collision,Chevrolet,Silverado,2019,Side-impact,Human
+e3fb0c8a-a386-479d-aba9-e9f3def1a9fe,Close Claim,2021-01-16 12:55:26.722959,Rebecca Smith,Chad Thornton,Elizabeth Phillips,1533.96,75,Collision,Chevrolet,Silverado,2019,Side-impact,Human
+831b193f-c037-475f-8814-a9d2f76c4d92,First Notification of Loss (FNOL),2022-02-16 19:54:46.631955,Ashley Martin,Michael Gonzales,Adam Bauer,1800.85,39,Collision,Toyota,Camry,2018,Head-on,Human
+831b193f-c037-475f-8814-a9d2f76c4d92,Assign Claim,2022-03-06 05:18:00.356891,Ashley Martin,Michael Gonzales,Adam Bauer,1800.85,39,Collision,Toyota,Camry,2018,Head-on,Human
+831b193f-c037-475f-8814-a9d2f76c4d92,Claim Decision,2022-03-12 02:12:36.603517,Ashley Martin,Michael Gonzales,Adam Bauer,1800.85,39,Collision,Toyota,Camry,2018,Head-on,Human
+831b193f-c037-475f-8814-a9d2f76c4d92,Set Reserve,2022-03-16 19:39:21.649918,Ashley Martin,Michael Gonzales,Adam Bauer,1800.85,39,Collision,Toyota,Camry,2018,Head-on,Human
+831b193f-c037-475f-8814-a9d2f76c4d92,Payment Sent,2022-03-22 05:14:37.560556,Ashley Martin,Michael Gonzales,Adam Bauer,1800.85,39,Collision,Toyota,Camry,2018,Head-on,Human
+831b193f-c037-475f-8814-a9d2f76c4d92,Close Claim,2022-03-26 01:06:56.330588,Ashley Martin,Michael Gonzales,Adam Bauer,1800.85,39,Collision,Toyota,Camry,2018,Head-on,Human

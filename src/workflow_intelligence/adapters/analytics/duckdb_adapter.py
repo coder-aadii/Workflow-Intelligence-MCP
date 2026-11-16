@@ -20,6 +20,11 @@ from typing import Any
 
 import duckdb
 
+from workflow_intelligence.security.file_validator import (
+    SecurityError,
+    validate_safe_path,
+)
+
 
 class DuckDBAdapterError(Exception):
     """Raised when DuckDB adapter operations fail."""
@@ -170,17 +175,21 @@ class DuckDBAdapter:
         """Register a local CSV file as a read-only DuckDB view.
 
         The view is replicated to every thread-local connection on first use.
+        File path is validated against directory traversal and allowlisted directories.
 
         Args:
             table_name: Logical name to expose the data under.
             path: Filesystem path to the CSV file.
 
         Raises:
-            DuckDBAdapterError: If the file is missing or registration fails.
+            DuckDBAdapterError: If security validation fails or registration fails.
         """
-        resolved = str(Path(path).expanduser().resolve())
-        if not Path(resolved).is_file():
-            raise DuckDBAdapterError(f"CSV file not found: {resolved}")
+        try:
+            safe_path = validate_safe_path(str(path), supported_extensions={".csv"})
+        except SecurityError as exc:
+            raise DuckDBAdapterError(f"Security validation failed for CSV file '{path}': {exc}") from exc
+
+        resolved = str(safe_path)
         safe_table = self._sanitize_table_name(table_name)
         with self._lock:
             self._registered_views[safe_table] = ("csv", resolved)
@@ -192,9 +201,12 @@ class DuckDBAdapter:
 
     def register_parquet(self, table_name: str, path: str | Path) -> None:
         """Register a local Parquet file as a read-only DuckDB view."""
-        resolved = str(Path(path).expanduser().resolve())
-        if not Path(resolved).is_file():
-            raise DuckDBAdapterError(f"Parquet file not found: {resolved}")
+        try:
+            safe_path = validate_safe_path(str(path), supported_extensions={".parquet", ".pq"})
+        except SecurityError as exc:
+            raise DuckDBAdapterError(f"Security validation failed for Parquet file '{path}': {exc}") from exc
+
+        resolved = str(safe_path)
         safe_table = self._sanitize_table_name(table_name)
         with self._lock:
             self._registered_views[safe_table] = ("parquet", resolved)
