@@ -57,12 +57,14 @@ def register_process_tools(mcp: FastMCP, service: ProcessService) -> None:
     async def process_identify_bottlenecks(
         source_uri: str,
         threshold_std_dev: float = 2.0,
+        min_frequency: int = 1,
     ) -> dict[str, Any]:
         """Identify operational bottlenecks using z-score deviation analysis.
 
         Args:
             source_uri: URI or path to the event log file.
             threshold_std_dev: Standard deviation threshold (default 2.0).
+            min_frequency: Minimum transition frequency threshold (default 1).
 
         Returns:
             Bottleneck report as a dictionary.
@@ -70,6 +72,7 @@ def register_process_tools(mcp: FastMCP, service: ProcessService) -> None:
         request = BottleneckRequest(
             source_uri=source_uri,
             threshold_std_dev=threshold_std_dev,
+            min_frequency=min_frequency,
         )
         result = service.identify_bottlenecks(request)
         return result.model_dump()
@@ -79,7 +82,12 @@ def register_process_tools(mcp: FastMCP, service: ProcessService) -> None:
         source_uri: str,
         min_frequency: int = 10,
     ) -> dict[str, Any]:
-        """Score repetitive activities for automation suitability.
+        """Score repetitive activities for automation suitability using relative heuristics.
+
+        Computes relative prioritization scores (0-100) based on observed event frequency,
+        elapsed stage transition durations, and consistency (1/variance).
+        Note: Durations reflect inter-event elapsed stage time rather than directly measured
+        human touch time; scores serve as relative candidate prioritization rankings.
 
         Args:
             source_uri: URI or path to the event log file.

@@ -300,6 +300,8 @@ class ProcessService:
         total_cases = formatted[_CASE_ID].nunique()
         total_events = len(formatted)
         unique_activities = sorted(formatted[_ACTIVITY].unique().tolist())
+        raw_act_counts = formatted[_ACTIVITY].value_counts().to_dict()
+        activity_frequencies = {str(k): int(v) for k, v in raw_act_counts.items()}
 
         # Variants
         variants = self._pm4py.discover_variants(formatted)
@@ -346,6 +348,7 @@ class ProcessService:
             top_variants=top_variants_list,
             average_case_duration_hours=avg_case_duration,
             transitions=transitions,
+            activity_frequencies=activity_frequencies,
         )
 
     def _resolve_columns(self, source_uri: str) -> tuple[str, str, str]:
@@ -418,8 +421,16 @@ class ProcessService:
         for t in analysis.transitions:
             if t.mean_duration_hours <= 0:
                 continue
+            if t.transition_count < request.min_frequency:
+                continue
             z_score = (t.mean_duration_hours - baseline_mean) / baseline_std
             if z_score >= request.threshold_std_dev:
+                warning = None
+                if t.transition_count < 30:
+                    warning = (
+                        f"Low sample size (n={t.transition_count}). Outlier delay may be an "
+                        "isolated edge case rather than a systemic process bottleneck."
+                    )
                 bottlenecks.append(
                     BottleneckItem(
                         stage_transition=(
@@ -437,6 +448,7 @@ class ProcessService:
                             + t.target_activity
                             + " transition to reduce delays."
                         ),
+                        sample_size_warning=warning,
                     )
                 )
 
@@ -455,6 +467,15 @@ class ProcessService:
 
         Uses formula: Score = f(frequency, duration, 1/variance)
         where higher frequency, longer duration, and lower variance increase score.
+
+        Activity frequency represents the true observed event count of each activity
+        in the event log (not the sum of in/out transition counts).
+
+        Duration and variance are computed from outgoing transitions (falling back to
+        incoming transitions for strictly terminal activities).
+
+        Scores are normalized to the [0.0, 100.0] range across candidate activities in
+        the process to prevent saturation and enable meaningful ranking.
 
         Args:
             request: Automation scoring request with source URI and min frequency.
@@ -481,61 +502,116 @@ class ProcessService:
         except ProcessServiceError:
             raise
 
-        # Count activity frequencies from transitions
-        activity_freq: dict[str, int] = {}
-        activity_durations: dict[str, list[float]] = {}
+        # Map outgoing and incoming transitions per activity
+        outgoing_transitions: dict[str, list[StageMetric]] = {}
+        incoming_transitions: dict[str, list[StageMetric]] = {}
         for t in analysis.transitions:
-            for activity in (t.source_activity, t.target_activity):
-                activity_freq[activity] = (
-                    activity_freq.get(activity, 0) + t.transition_count
-                )
-                activity_durations.setdefault(activity, []).append(
-                    t.mean_duration_hours
+            outgoing_transitions.setdefault(t.source_activity, []).append(t)
+            incoming_transitions.setdefault(t.target_activity, []).append(t)
+
+        # Retrieve true activity event occurrence frequencies
+        activity_freq = dict(analysis.activity_frequencies)
+        if not activity_freq:
+            # Fallback for backwards compatibility if activity_frequencies was not populated
+            for t in analysis.transitions:
+                activity_freq[t.source_activity] = (
+                    activity_freq.get(t.source_activity, 0) + t.transition_count
                 )
 
-        # Filter by min frequency
-        candidates: list[AutomationCandidate] = []
+        raw_candidates: list[dict[str, Any]] = []
         for activity, freq in activity_freq.items():
             if freq < request.min_frequency:
                 continue
 
-            durations = activity_durations.get(activity, [0.0])
-            avg_minutes = (sum(durations) / len(durations)) * 60.0 if durations else 0.0
-            variance_minutes = (
-                (sum((d - avg_minutes / 60.0) ** 2 for d in durations) / len(durations))
-                * 3600.0
-                if len(durations) > 1
-                else 0.0
-            )
-            std_minutes = variance_minutes**0.5
+            # Prefer outgoing transitions for stage duration and variance;
+            # fall back to incoming transitions if the activity is terminal.
+            trans_list = outgoing_transitions.get(activity, [])
+            if not trans_list:
+                trans_list = incoming_transitions.get(activity, [])
 
-            # Manual effort score: higher duration and frequency = more effort
-            manual_effort = min(100.0, (avg_minutes / 10.0) + (freq / 5.0))
+            total_weight = sum(t.transition_count for t in trans_list)
+            if total_weight > 0:
+                avg_minutes = (
+                    sum(
+                        t.transition_count * t.mean_duration_hours * 60.0
+                        for t in trans_list
+                    )
+                    / total_weight
+                )
+                variance_minutes = (
+                    sum(
+                        t.transition_count
+                        * ((t.mean_duration_hours * 60.0) - avg_minutes) ** 2
+                        for t in trans_list
+                    )
+                    / total_weight
+                )
+                std_minutes = variance_minutes**0.5
+            else:
+                avg_minutes = 0.0
+                std_minutes = 0.0
 
-            # Automation potential: frequency * duration / (1 + variance)
             variance_factor = 1.0 / (1.0 + std_minutes)
-            automation_potential = min(
-                100.0, freq * avg_minutes * variance_factor / 100.0
+            raw_automation = freq * avg_minutes * variance_factor
+            raw_effort = freq * avg_minutes
+
+            raw_candidates.append(
+                {
+                    "activity_name": activity,
+                    "execution_frequency": freq,
+                    "avg_duration_minutes": avg_minutes,
+                    "standard_deviation_minutes": std_minutes,
+                    "raw_automation": raw_automation,
+                    "raw_effort": raw_effort,
+                }
             )
+
+        # Normalize relative to max candidate scores to prevent saturation
+        max_auto = max((c["raw_automation"] for c in raw_candidates), default=1.0)
+        max_effort = max((c["raw_effort"] for c in raw_candidates), default=1.0)
+        if max_auto <= 0:
+            max_auto = 1.0
+        if max_effort <= 0:
+            max_effort = 1.0
+
+        candidates: list[AutomationCandidate] = []
+        for raw_c in raw_candidates:
+            auto_score = (raw_c["raw_automation"] / max_auto) * 100.0
+            effort_score = (raw_c["raw_effort"] / max_effort) * 100.0
 
             candidates.append(
                 AutomationCandidate(
-                    activity_name=activity,
-                    execution_frequency=freq,
-                    avg_duration_minutes=avg_minutes,
-                    standard_deviation_minutes=std_minutes,
-                    manual_effort_score=round(manual_effort, 2),
-                    automation_potential_score=round(automation_potential, 2),
+                    activity_name=raw_c["activity_name"],
+                    execution_frequency=raw_c["execution_frequency"],
+                    avg_duration_minutes=round(raw_c["avg_duration_minutes"], 2),
+                    standard_deviation_minutes=round(
+                        raw_c["standard_deviation_minutes"], 2
+                    ),
+                    manual_effort_score=round(min(100.0, max(0.0, effort_score)), 2),
+                    automation_potential_score=round(
+                        min(100.0, max(0.0, auto_score)), 2
+                    ),
                     rank=0,
                 )
             )
 
-        # Rank by automation potential score (descending)
-        candidates.sort(key=lambda c: c.automation_potential_score, reverse=True)
-        for idx, c in enumerate(candidates, start=1):
-            c.rank = idx
+        # Deterministic ranking: automation score desc, manual effort desc, frequency desc, activity name asc
+        candidates.sort(
+            key=lambda item: (
+                -item.automation_potential_score,
+                -item.manual_effort_score,
+                -item.execution_frequency,
+                item.activity_name,
+            )
+        )
+        for idx, ranked_cand in enumerate(candidates, start=1):
+            ranked_cand.rank = idx
 
         return AutomationScoreReport(
             candidates=candidates,
-            methodology="Score = f(frequency, duration, 1/variance)",
+            methodology=(
+                "Relative heuristic scoring: automation_potential = f(frequency, elapsed_stage_duration, 1/(1+std_dev)) "
+                "normalized across candidates. Manual effort index = f(frequency, elapsed_stage_duration) normalized. "
+                "Note: Elapsed duration reflects inter-event transition time rather than verified human touch time."
+            ),
         )

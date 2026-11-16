@@ -8,6 +8,21 @@ from pathlib import Path
 
 import pytest
 
+from workflow_intelligence.config import get_settings
+
+
+@pytest.fixture(autouse=True)
+def clean_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure environment is deterministic across test suites."""
+    # Ensure MCP_AUTH_TOKEN from developer's local .env file does not
+    # accidentally enforce authentication on unauthenticated integration tests.
+    if os.environ.get("MCP_AUTH_TOKEN") in (
+        None,
+        "secure_prod_mcp_bearer_token_77665544332211",
+    ):
+        monkeypatch.setenv("MCP_AUTH_TOKEN", "")
+    get_settings.cache_clear()
+
 
 @pytest.fixture
 def isolated_duckdb_path(tmp_path: Path) -> Path:

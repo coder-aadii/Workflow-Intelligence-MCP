@@ -124,9 +124,10 @@ class TestProcessSchemas:
             )
 
     def test_bottleneck_request_defaults(self) -> None:
-        """BottleneckRequest should default threshold_std_dev to 2.0."""
+        """BottleneckRequest should default threshold_std_dev to 2.0 and min_frequency to 1."""
         req = BottleneckRequest(source_uri="events.csv")
         assert req.threshold_std_dev == 2.0
+        assert req.min_frequency == 1
 
     def test_bottleneck_request_rejects_non_positive_threshold(self) -> None:
         """BottleneckRequest should reject threshold_std_dev <= 0."""

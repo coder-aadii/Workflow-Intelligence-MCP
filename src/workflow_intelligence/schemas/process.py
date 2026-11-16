@@ -37,6 +37,7 @@ class BottleneckRequest(BaseModel):
     Attributes:
         source_uri: URI or path to the event log.
         threshold_std_dev: Standard deviation threshold for anomaly detection.
+        min_frequency: Minimum transition frequency threshold (default 1).
     """
 
     source_uri: str = Field(
@@ -46,6 +47,11 @@ class BottleneckRequest(BaseModel):
         default=2.0,
         gt=0,
         description="Standard deviation threshold for anomaly detection.",
+    )
+    min_frequency: int = Field(
+        default=1,
+        ge=1,
+        description="Minimum transition frequency threshold.",
     )
 
 
@@ -137,6 +143,10 @@ class ProcessAnalysisResult(BaseMCPResponse):
         default_factory=list,
         description="List of transition metrics between activities.",
     )
+    activity_frequencies: dict[str, int] = Field(
+        default_factory=dict,
+        description="Observed event occurrence count per activity in the log.",
+    )
 
 
 class BottleneckItem(BaseModel):
@@ -171,6 +181,10 @@ class BottleneckItem(BaseModel):
         default=None, description="Optional primary contributing factor."
     )
     recommendation: str = Field(..., description="Remediation recommendation.")
+    sample_size_warning: str | None = Field(
+        default=None,
+        description="Statistical reliability warning when affected_case_count is small (e.g. < 30 cases).",
+    )
 
 
 class BottleneckReport(BaseMCPResponse):
@@ -197,38 +211,54 @@ class AutomationCandidate(BaseModel):
 
     Attributes:
         activity_name: Activity name.
-        execution_frequency: Observed frequency of the activity.
-        avg_duration_minutes: Average duration in minutes.
-        standard_deviation_minutes: Standard deviation of duration in minutes.
-        manual_effort_score: Manual effort score (0-100).
-        automation_potential_score: Automation potential score (0-100).
-        rank: Rank among candidates (1 = highest priority).
+        execution_frequency: Observed event frequency of the activity in the log.
+        avg_duration_minutes: Average elapsed stage duration in minutes (transition to next activity).
+        standard_deviation_minutes: Standard deviation of elapsed duration in minutes.
+        manual_effort_score: Relative heuristic manual effort index (0-100).
+        automation_potential_score: Relative heuristic automation prioritization score (0-100).
+        rank: Priority rank among candidates (1 = highest priority).
     """
 
     activity_name: str = Field(..., description="Activity name.")
     execution_frequency: int = Field(
-        default=0, ge=0, description="Observed frequency of the activity."
+        default=0,
+        ge=0,
+        description="Observed event frequency of the activity in the event log.",
     )
     avg_duration_minutes: float = Field(
-        default=0.0, ge=0, description="Average duration in minutes."
+        default=0.0,
+        ge=0,
+        description="Average elapsed stage duration in minutes (transition time to next activity; includes waiting time).",
     )
     standard_deviation_minutes: float = Field(
-        default=0.0, ge=0, description="Standard deviation of duration in minutes."
+        default=0.0,
+        ge=0,
+        description="Standard deviation of elapsed duration in minutes.",
     )
     manual_effort_score: float = Field(
         default=0.0,
         ge=0,
         le=100,
-        description="Manual effort score (0-100).",
+        description=(
+            "Relative heuristic manual effort index (0-100) estimated from frequency and "
+            "elapsed stage duration. Note: reflects inter-event elapsed duration rather than "
+            "directly observed human touch time."
+        ),
     )
     automation_potential_score: float = Field(
         default=0.0,
         ge=0,
         le=100,
-        description="Automation potential score (0-100).",
+        description=(
+            "Relative heuristic automation prioritization score (0-100) combining frequency, "
+            "elapsed stage duration, and consistency (1/variance) normalized across candidates. "
+            "Prioritization guide; does not represent guaranteed engineering feasibility."
+        ),
     )
     rank: int = Field(
-        default=0, ge=0, description="Rank among candidates (1 = highest priority)."
+        default=0,
+        ge=0,
+        description="Rank among candidates (1 = highest priority).",
     )
 
 
@@ -237,10 +267,13 @@ class AutomationScoreReport(BaseMCPResponse):
 
     Attributes:
         candidates: Ranked list of automation candidates.
-        methodology: Scoring methodology description.
+        methodology: Description of the relative heuristic scoring methodology and data limitations.
     """
 
     candidates: list[AutomationCandidate] = Field(
         default_factory=list, description="Ranked list of automation candidates."
     )
-    methodology: str = Field(..., description="Scoring methodology description.")
+    methodology: str = Field(
+        ...,
+        description="Description of the relative heuristic scoring methodology and data limitations.",
+    )
