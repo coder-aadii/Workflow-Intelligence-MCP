@@ -176,24 +176,29 @@ def register_process_resources(
             }
             return json.dumps(graph)
 
-        # Use the resolved dataset's columns for mining, falling back to
-        # conventional names when auto-detection is not available.
+        # Use the resolved dataset's columns for mining via unified column detection.
         from workflow_intelligence.adapters.file_storage.loader import (
             get_event_log_columns,
         )
+        from workflow_intelligence.services.process_service import (
+            ProcessServiceError,
+            _detect_columns,
+        )
 
         columns = get_event_log_columns(str(dataset_path))
-        col_lower = {c.lower(): c for c in columns}
-
-        def pick(*candidates: str) -> str:
-            for cand in candidates:
-                if cand.lower() in col_lower:
-                    return col_lower[cand.lower()]
-            return candidates[0]
-
-        case_id_col = pick("case_id", "caseid", "case id", "id")
-        activity_col = pick("activity", "act", "action")
-        timestamp_col = pick("timestamp", "time", "date", "ts")
+        try:
+            case_id_col, activity_col, timestamp_col = _detect_columns(columns)
+        except ProcessServiceError as exc:
+            return json.dumps(
+                {
+                    "process_name": process_name,
+                    "nodes": [],
+                    "edges": [],
+                    "total_cases": 0,
+                    "total_events": 0,
+                    "note": f"Column resolution failed for process '{process_name}': {exc}",
+                }
+            )
 
         request = ProcessAnalyzeRequest(
             source_uri=str(dataset_path),

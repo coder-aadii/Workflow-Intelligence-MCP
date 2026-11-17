@@ -67,6 +67,24 @@ class ReportingService:
                 cannot be registered.
         """
         self._analytics.use_source(source_uri, table_name)
+        self._analytics._ensure_registered(table_name)
+
+        # Validate timeframe column exists in the registered table
+        try:
+            cols_rows = self._analytics.adapter.execute_query(
+                f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"
+            )
+            available_cols = [str(r[0]) for r in cols_rows]
+        except Exception:
+            available_cols = []
+
+        if available_cols and timeframe_column not in available_cols:
+            from workflow_intelligence.services.analytics_service import AnalyticsServiceError
+
+            raise AnalyticsServiceError(
+                f"Timeframe column '{timeframe_column}' not found in '{source_uri}'. "
+                f"Available columns: {available_cols}. Please specify a valid timeframe column."
+            )
 
         # Validate every metric id against the registry before computing
         # anything, so we never fabricate a metric that does not exist.
@@ -88,7 +106,9 @@ class ReportingService:
         if findings:
             primary_metric = request.metric_ids[0]
             # Dynamically infer the dimension column instead of hardcoding "department".
-            dimension_col = self._analytics.infer_dimension_column(table_name)
+            dimension_col = self._analytics.infer_dimension_column(
+                table_name, timeframe_column=timeframe_column
+            )
             attributions = self._analytics.rank_dimensions(
                 table_name,
                 primary_metric,

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Self
+
+from pydantic import BaseModel, Field, model_validator
 
 from .common import BaseMCPResponse
 
@@ -15,6 +17,7 @@ class ProcessAnalyzeRequest(BaseModel):
         case_id_col: Column name for case identifiers.
         activity_col: Column name for activity names.
         timestamp_col: Column name for event timestamps.
+        timestamp_format: Optional timestamp format or epoch specification ('epoch', 'epoch_ms', 'epoch_s').
     """
 
     source_uri: str = Field(
@@ -29,6 +32,22 @@ class ProcessAnalyzeRequest(BaseModel):
     timestamp_col: str = Field(
         ..., min_length=1, description="Column name for event timestamps."
     )
+    timestamp_format: str | None = Field(
+        default=None,
+        description="Optional timestamp format (e.g. '%Y-%m-%d %H:%M:%S') or epoch specification ('epoch', 'epoch_ms', 'epoch_s').",
+    )
+
+    @model_validator(mode="after")
+    def validate_distinct_columns(self) -> Self:
+        cols = [self.case_id_col, self.activity_col, self.timestamp_col]
+        if len(set(cols)) != 3:
+            raise ValueError(
+                f"Column names must be distinct for case_id, activity, and timestamp. "
+                f"Received: case_id_col='{self.case_id_col}', "
+                f"activity_col='{self.activity_col}', "
+                f"timestamp_col='{self.timestamp_col}'."
+            )
+        return self
 
 
 class BottleneckRequest(BaseModel):
@@ -38,6 +57,10 @@ class BottleneckRequest(BaseModel):
         source_uri: URI or path to the event log.
         threshold_std_dev: Standard deviation threshold for anomaly detection.
         min_frequency: Minimum transition frequency threshold (default 1).
+        case_id_col: Optional column name for case identifiers.
+        activity_col: Optional column name for activity names.
+        timestamp_col: Optional column name for event timestamps.
+        timestamp_format: Optional timestamp format or epoch specification.
     """
 
     source_uri: str = Field(
@@ -53,6 +76,22 @@ class BottleneckRequest(BaseModel):
         ge=1,
         description="Minimum transition frequency threshold.",
     )
+    case_id_col: str | None = Field(
+        default=None,
+        description="Optional column name for case identifiers.",
+    )
+    activity_col: str | None = Field(
+        default=None,
+        description="Optional column name for activity names.",
+    )
+    timestamp_col: str | None = Field(
+        default=None,
+        description="Optional column name for event timestamps.",
+    )
+    timestamp_format: str | None = Field(
+        default=None,
+        description="Optional timestamp format or epoch specification ('epoch', 'epoch_ms', 'epoch_s').",
+    )
 
 
 class AutomationScoreRequest(BaseModel):
@@ -61,6 +100,10 @@ class AutomationScoreRequest(BaseModel):
     Attributes:
         source_uri: URI or path to the event log.
         min_frequency: Minimum frequency threshold for candidate activities.
+        case_id_col: Optional column name for case identifiers.
+        activity_col: Optional column name for activity names.
+        timestamp_col: Optional column name for event timestamps.
+        timestamp_format: Optional timestamp format or epoch specification.
     """
 
     source_uri: str = Field(
@@ -70,6 +113,22 @@ class AutomationScoreRequest(BaseModel):
         default=10,
         ge=1,
         description="Minimum frequency threshold for candidate activities.",
+    )
+    case_id_col: str | None = Field(
+        default=None,
+        description="Optional column name for case identifiers.",
+    )
+    activity_col: str | None = Field(
+        default=None,
+        description="Optional column name for activity names.",
+    )
+    timestamp_col: str | None = Field(
+        default=None,
+        description="Optional column name for event timestamps.",
+    )
+    timestamp_format: str | None = Field(
+        default=None,
+        description="Optional timestamp format or epoch specification ('epoch', 'epoch_ms', 'epoch_s').",
     )
 
 

@@ -106,6 +106,18 @@ class DecisionBriefRequest(BaseModel):
         default_factory=list,
         description="List of metric identifiers to include.",
     )
+    source_uri: str | None = Field(
+        default=None, description="Optional path or URI to the dataset."
+    )
+    timeframe_column: str | None = Field(
+        default=None, description="Optional column used for period filtering."
+    )
+    timeframe_current: str | None = Field(
+        default=None, description="Optional current period identifier."
+    )
+    timeframe_baseline: str | None = Field(
+        default=None, description="Optional baseline period identifier."
+    )
 
 
 class MetricComparison(BaseModel):

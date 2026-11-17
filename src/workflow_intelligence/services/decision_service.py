@@ -128,7 +128,9 @@ class DecisionService:
         # Dynamically infer the dimension column when none is provided.
         dimension_col = request.dimension
         if dimension_col is None:
-            dimension_col = self._analytics.infer_dimension_column(table_name)
+            dimension_col = self._analytics.infer_dimension_column(
+                table_name, timeframe_column=request.timeframe_column
+            )
 
         attributions = self._analytics.rank_dimensions(
             table_name,
@@ -216,11 +218,17 @@ class DecisionService:
             current_quarter: Current period identifier.
             baseline_quarter: Baseline period identifier.
         """
+        eff_source = request.source_uri or source_uri
+        eff_table = _table_name_from_uri(eff_source) if request.source_uri else table_name
+        eff_timeframe_col = request.timeframe_column or timeframe_column
+        eff_current = request.timeframe_current or current_quarter
+        eff_baseline = request.timeframe_baseline or baseline_quarter
+
         return self._reporting.generate_brief(
             request,
-            source_uri=source_uri,
-            table_name=table_name,
-            timeframe_column=timeframe_column,
-            current_quarter=current_quarter,
-            baseline_quarter=baseline_quarter,
+            source_uri=eff_source,
+            table_name=eff_table,
+            timeframe_column=eff_timeframe_col,
+            current_quarter=eff_current,
+            baseline_quarter=eff_baseline,
         )

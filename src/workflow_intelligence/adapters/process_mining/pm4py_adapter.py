@@ -45,21 +45,104 @@ class PM4PyAdapter:
         case_id_col: str,
         activity_col: str,
         timestamp_col: str,
+        timestamp_format: str | None = None,
     ) -> pd.DataFrame:
         """Format a DataFrame as a PM4Py-compatible event log.
 
-        Renames columns to pm4py standard names, converts timestamps,
-        and sorts by case and timestamp for deterministic processing.
+        Renames columns to pm4py standard names, validates data integrity,
+        converts timestamps, and sorts by case and timestamp for deterministic
+        processing.
 
         Args:
             df: Raw event log DataFrame.
             case_id_col: Column name for case identifiers.
             activity_col: Column name for activity names.
             timestamp_col: Column name for event timestamps.
+            timestamp_format: Optional timestamp format or epoch specification
+                ('epoch', 'epoch_ms', 'epoch_s').
 
         Returns:
             PM4Py-formatted DataFrame.
+
+        Raises:
+            PM4PyAdapterError: If columns are duplicated, required columns contain
+                nulls, or timestamps are invalid/unparseable or numeric without epoch config.
         """
+        if len({case_id_col, activity_col, timestamp_col}) != 3:
+            raise PM4PyAdapterError(
+                f"Columns must be distinct for case_id, activity, and timestamp. "
+                f"Received duplicate mappings: case_id='{case_id_col}', "
+                f"activity='{activity_col}', timestamp='{timestamp_col}'."
+            )
+
+        if len(df) == 0:
+            return pd.DataFrame(
+                columns=["case:concept:name", "concept:name", "time:timestamp"]
+            )
+
+        # Validate case_id values
+        case_series = df[case_id_col]
+        null_cases = (
+            case_series.isna()
+            | (case_series.astype(str).str.strip().isin({"", "nan", "None", "NULL"}))
+        )
+        if null_cases.any():
+            null_count = int(null_cases.sum())
+            raise PM4PyAdapterError(
+                f"Case ID column '{case_id_col}' contains {null_count} null or empty values "
+                f"out of {len(df)} events."
+            )
+
+        # Validate activity values
+        act_series = df[activity_col]
+        null_acts = (
+            act_series.isna()
+            | (act_series.astype(str).str.strip().isin({"", "nan", "None", "NULL"}))
+        )
+        if null_acts.any():
+            null_count = int(null_acts.sum())
+            raise PM4PyAdapterError(
+                f"Activity column '{activity_col}' contains {null_count} null or empty values "
+                f"out of {len(df)} events."
+            )
+
+        # Validate timestamps and reject accidental numeric coercion
+        ts_series = df[timestamp_col]
+        if pd.api.types.is_numeric_dtype(ts_series):
+            if not timestamp_format:
+                raise PM4PyAdapterError(
+                    f"Timestamp column '{timestamp_col}' has numeric dtype ({ts_series.dtype}). "
+                    "Automatic numeric-to-datetime coercion is rejected by default to prevent treating "
+                    "metrics or IDs as timestamps. Configure timestamp_format='epoch' (or 'epoch_s', 'epoch_ms') "
+                    "if this column represents epoch timestamps."
+                )
+
+        try:
+            if timestamp_format in ("epoch", "epoch_s", "s"):
+                converted_ts = pd.to_datetime(ts_series, unit="s", errors="coerce")
+            elif timestamp_format in ("epoch_ms", "ms"):
+                converted_ts = pd.to_datetime(ts_series, unit="ms", errors="coerce")
+            elif timestamp_format in ("epoch_ns", "ns"):
+                converted_ts = pd.to_datetime(ts_series, unit="ns", errors="coerce")
+            elif timestamp_format:
+                converted_ts = pd.to_datetime(
+                    ts_series, format=timestamp_format, errors="coerce"
+                )
+            else:
+                converted_ts = pd.to_datetime(ts_series, errors="coerce")
+        except Exception as exc:
+            raise PM4PyAdapterError(
+                f"Failed to parse timestamp column '{timestamp_col}': {exc}"
+            ) from exc
+
+        null_ts = converted_ts.isna()
+        if null_ts.any():
+            null_count = int(null_ts.sum())
+            raise PM4PyAdapterError(
+                f"Timestamp column '{timestamp_col}' contains {null_count} invalid or unparseable "
+                f"datetime values out of {len(df)} events."
+            )
+
         formatted = df.copy()
         formatted = formatted.rename(
             columns={
@@ -68,7 +151,9 @@ class PM4PyAdapter:
                 timestamp_col: "time:timestamp",
             }
         )
-        formatted["time:timestamp"] = pd.to_datetime(formatted["time:timestamp"])
+        formatted["case:concept:name"] = formatted["case:concept:name"].astype(str)
+        formatted["concept:name"] = formatted["concept:name"].astype(str)
+        formatted["time:timestamp"] = converted_ts
         formatted = formatted.sort_values(
             ["case:concept:name", "time:timestamp"], kind="mergesort"
         )

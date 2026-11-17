@@ -117,6 +117,10 @@ def register_decision_tools(mcp: FastMCP, service: DecisionService) -> None:
     async def decision_generate_brief(
         topic: str,
         metric_ids: list[str],
+        source_uri: str | None = None,
+        timeframe_column: str | None = None,
+        timeframe_current: str | None = None,
+        timeframe_baseline: str | None = None,
     ) -> dict[str, Any]:
         """Generate a structured, evidence-backed decision brief.
 
@@ -127,10 +131,21 @@ def register_decision_tools(mcp: FastMCP, service: DecisionService) -> None:
         Args:
             topic: Topic of the decision brief.
             metric_ids: List of metric identifiers to include.
+            source_uri: Optional path or URI to the dataset.
+            timeframe_column: Optional column used for period filtering.
+            timeframe_current: Optional current period identifier.
+            timeframe_baseline: Optional baseline period identifier.
 
         Returns:
             Decision brief as a dictionary.
         """
-        request = DecisionBriefRequest(topic=topic, metric_ids=metric_ids)
+        request = DecisionBriefRequest(
+            topic=topic,
+            metric_ids=metric_ids,
+            source_uri=source_uri,
+            timeframe_column=timeframe_column,
+            timeframe_current=timeframe_current,
+            timeframe_baseline=timeframe_baseline,
+        )
         result = service.generate_brief(request)
         return result.model_dump()

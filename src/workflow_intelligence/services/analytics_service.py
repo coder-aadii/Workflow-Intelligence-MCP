@@ -636,19 +636,26 @@ class AnalyticsService:
             "count": float(count) if count is not None else 0.0,
         }
 
-    def infer_dimension_column(self, table_name: str) -> str:
+    def infer_dimension_column(
+        self, table_name: str, timeframe_column: str = "timeframe"
+    ) -> str:
         """Infer a categorical dimension column from DuckDB table metadata.
 
-        Queries ``information_schema.columns`` and returns the first
-        VARCHAR/TEXT column that is not the timeframe column, so callers
-        can segment deviations without hardcoding ``"department"``.
+        Queries ``information_schema.columns`` and evaluates candidate
+        VARCHAR/TEXT columns, filtering out timeframe columns and high-cardinality
+        row identifiers (e.g. 100% unique primary keys) to segment deviations
+        intelligently.
 
         Args:
             table_name: DuckDB table/view to inspect.
+            timeframe_column: The timeframe column to exclude from dimension candidates.
 
         Returns:
             The name of a categorical column suitable for dimensional
-            attribution, or ``"department"`` as a fallback.
+            attribution.
+
+        Raises:
+            AnalyticsServiceError: If no suitable categorical column can be found.
         """
         self._ensure_registered(table_name)
         sql = (
@@ -661,10 +668,79 @@ class AnalyticsService:
             rows = self._adapter.execute_query(sql)
         except DuckDBAdapterError:
             rows = []
-        for (col_name,) in rows:
-            if col_name and col_name.lower() not in {"timeframe", "quarter"}:
-                return str(col_name)
-        return "department"
+
+        excluded_names = {
+            timeframe_column.lower(),
+            "timeframe",
+            "quarter",
+            "period",
+            "date",
+            "month",
+            "year",
+        }
+        text_cols = [
+            str(col_name)
+            for (col_name,) in rows
+            if col_name and str(col_name).lower() not in excluded_names
+        ]
+
+        if not text_cols:
+            all_cols = self._adapter.execute_query(
+                f"SELECT column_name FROM information_schema.columns WHERE table_name = '{table_name}'"
+            )
+            col_names = [str(r[0]) for r in all_cols]
+            if "department" in col_names:
+                return "department"
+            raise AnalyticsServiceError(
+                f"No suitable categorical dimension column found in '{table_name}'. "
+                f"Available columns: {col_names}. Please specify 'dimension' explicitly."
+            )
+
+        scored_candidates: list[tuple[int, int, str]] = []
+        for col in text_cols:
+            try:
+                card_row = self._adapter.execute_query(
+                    f'SELECT COUNT(DISTINCT "{col}"), COUNT(*) FROM {table_name}'
+                )
+                distinct_cnt = (
+                    int(card_row[0][0])
+                    if card_row and card_row[0][0] is not None
+                    else 0
+                )
+                total_cnt = (
+                    int(card_row[0][1])
+                    if card_row and card_row[0][1] is not None
+                    else 0
+                )
+            except Exception:
+                distinct_cnt = 0
+                total_cnt = 0
+
+            col_lower = col.lower()
+            is_id_name = (
+                col_lower in ("id", "row_id", "uuid", "guid", "pk")
+                or col_lower.endswith(("_id", "_uuid", "_guid", "_pk"))
+            )
+            is_unique_pk = total_cnt > 1 and distinct_cnt == total_cnt
+
+            if is_unique_pk:
+                priority = 3
+            elif is_id_name and distinct_cnt > max(20, int(total_cnt * 0.5)):
+                priority = 3
+            elif is_id_name:
+                priority = 1
+            elif 1 < distinct_cnt <= max(50, int(total_cnt * 0.5)):
+                priority = 0
+            else:
+                priority = 2
+
+            scored_candidates.append((priority, distinct_cnt, col))
+
+        scored_candidates.sort(key=lambda x: (x[0], x[1]))
+        best = scored_candidates[0]
+        if best[0] == 3 and "department" in text_cols:
+            return "department"
+        return best[2]
 
     @staticmethod
     def significance_for_delta(

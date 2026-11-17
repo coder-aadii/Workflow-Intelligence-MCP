@@ -243,11 +243,20 @@ def load_event_log(
             "Failed to read event log '" + source_uri + "': " + str(exc)
         ) from exc
 
+    if len({case_id_col, activity_col, timestamp_col}) != 3:
+        raise FileStorageError(
+            f"Columns must be distinct for case_id, activity, and timestamp. "
+            f"Received duplicate or overlapping mappings: case_id='{case_id_col}', "
+            f"activity='{activity_col}', timestamp='{timestamp_col}'. "
+            f"Available columns: {list(df.columns)}"
+        )
+
     required_cols = {case_id_col, activity_col, timestamp_col}
     missing = required_cols - set(df.columns)
     if missing:
         raise FileStorageError(
-            "Missing required columns in '" + source_uri + "': " + str(sorted(missing))
+            f"Missing required columns in '{source_uri}': {sorted(missing)}. "
+            f"Available columns: {list(df.columns)}"
         )
 
     return df

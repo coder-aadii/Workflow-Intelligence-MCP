@@ -40,61 +40,155 @@ class ProcessServiceError(Exception):
     """Raised when process discovery service operations fail."""
 
 
+CANONICAL_CASE_COLS = ("case_id", "caseid")
+CANONICAL_ACTIVITY_COLS = ("activity", "activity_name", "ocel:activity")
+CANONICAL_TIMESTAMP_COLS = ("timestamp", "time:timestamp", "ocel:timestamp")
+
+SYNONYM_CASE_COLS = (
+    "case_id",
+    "caseid",
+    "case_number",
+    "case_no",
+    "case",
+    "order_id",
+    "claim_id",
+    "ticket_id",
+    "invoice_id",
+    "incident_id",
+    "patient_id",
+    "correlation_id",
+    "trace_id",
+    "session_id",
+    "run_id",
+    "job_id",
+    "id",
+)
+SYNONYM_ACTIVITY_COLS = (
+    "activity",
+    "activity_name",
+    "act",
+    "task",
+    "task_name",
+    "action",
+    "status",
+    "event",
+    "event_type",
+    "stage",
+    "step",
+    "state",
+    "operation",
+    "milestone",
+)
+SYNONYM_TIMESTAMP_COLS = (
+    "timestamp",
+    "time:timestamp",
+    "datetime",
+    "event_time",
+    "event_timestamp",
+    "created_at",
+    "date",
+    "time",
+    "ts",
+    "start_time",
+    "end_time",
+    "timestamp_utc",
+    "logged_at",
+    "occurred_at",
+)
+
+
 def _detect_columns(columns: list[str]) -> tuple[str, str, str]:
     """Heuristically detect case/activity/timestamp columns from a header list.
 
-    Matches columns case-insensitively against common names, falling back to
-    positional columns when no match is found. Also recognizes OCEL
-    extended-table column names (``ocel:activity``, ``ocel:timestamp``,
-    ``ocel:type:*``).
+    Matches columns case-insensitively against canonical names and recognized
+    synonyms. Rejects missing, ambiguous, or duplicate mappings without unsafe
+    positional fallback. Also recognizes OCEL extended-table column names
+    (``ocel:activity``, ``ocel:timestamp``, ``ocel:type:*``).
 
     Args:
         columns: List of column names from the event log header.
 
     Returns:
         Tuple of (case_id_col, activity_col, timestamp_col).
+
+    Raises:
+        ProcessServiceError: If any role cannot be inferred unambiguously.
     """
     lower = {c.lower(): c for c in columns}
 
-    case_candidates = ("case_id", "caseid", "case", "id")
-    activity_candidates = ("activity", "act", "activity_name", "task")
-    timestamp_candidates = (
+    def _match_role(
+        role: str,
+        canonical_candidates: tuple[str, ...],
+        synonym_candidates: tuple[str, ...],
+        ocel_prefix: str | None = None,
+    ) -> str:
+        # Check OCEL prefix if applicable
+        if ocel_prefix:
+            ocel_matches = sorted(
+                c for c in columns if c.lower().startswith(ocel_prefix)
+            )
+            if len(ocel_matches) == 1:
+                return ocel_matches[0]
+            if len(ocel_matches) > 1:
+                raise ProcessServiceError(
+                    f"Ambiguous column mapping for '{role}': multiple OCEL candidates "
+                    f"found {ocel_matches}. Available columns: {columns}. "
+                    f"Please specify '{role}_col' explicitly."
+                )
+
+        # Check canonical matches
+        canonical_matches = [lower[c] for c in canonical_candidates if c in lower]
+        if len(canonical_matches) == 1:
+            return canonical_matches[0]
+        if len(canonical_matches) > 1:
+            raise ProcessServiceError(
+                f"Ambiguous column mapping for '{role}': multiple canonical candidates "
+                f"found {canonical_matches}. Available columns: {columns}. "
+                f"Please specify '{role}_col' explicitly."
+            )
+
+        # Check broader synonym matches
+        synonym_matches = [
+            lower[c] for c in synonym_candidates if c in lower and c not in canonical_candidates
+        ]
+        if len(synonym_matches) == 1:
+            return synonym_matches[0]
+        if len(synonym_matches) > 1:
+            raise ProcessServiceError(
+                f"Ambiguous column mapping for '{role}': multiple candidates "
+                f"found {synonym_matches}. Available columns: {columns}. "
+                f"Please specify '{role}_col' explicitly."
+            )
+
+        raise ProcessServiceError(
+            f"Could not automatically infer '{role}' column from event log. "
+            f"Available columns: {columns}. Please specify '{role}_col' explicitly."
+        )
+
+    case_id_col = _match_role(
+        "case_id",
+        CANONICAL_CASE_COLS,
+        SYNONYM_CASE_COLS,
+        ocel_prefix="ocel:type:",
+    )
+    activity_col = _match_role(
+        "activity",
+        CANONICAL_ACTIVITY_COLS,
+        SYNONYM_ACTIVITY_COLS,
+    )
+    timestamp_col = _match_role(
         "timestamp",
-        "time",
-        "time:timestamp",
-        "datetime",
-        "date",
-        "event_time",
+        CANONICAL_TIMESTAMP_COLS,
+        SYNONYM_TIMESTAMP_COLS,
     )
 
-    def _first_match(candidates: tuple[str, ...]) -> str | None:
-        for cand in candidates:
-            if cand in lower:
-                return lower[cand]
-        return None
-
-    # Case ID: prefer explicit case columns, then OCEL object columns
-    # (ocel:type:*), then fall back to the first column.
-    case_id_col = _first_match(case_candidates)
-    if case_id_col is None:
-        ocel_case_cols = sorted(
-            c for c in columns if c.lower().startswith("ocel:type:")
+    if len({case_id_col, activity_col, timestamp_col}) != 3:
+        raise ProcessServiceError(
+            f"Inferred overlapping or duplicate columns: case_id='{case_id_col}', "
+            f"activity='{activity_col}', timestamp='{timestamp_col}'. "
+            f"Each role must map to a distinct column. Available columns: {columns}. "
+            "Please specify column mappings explicitly."
         )
-        case_id_col = ocel_case_cols[0] if ocel_case_cols else columns[0]
-
-    # Activity: prefer explicit activity columns, then ocel:activity.
-    activity_col = _first_match(activity_candidates)
-    if activity_col is None:
-        activity_col = (
-            lower["ocel:activity"] if "ocel:activity" in lower else None
-        ) or (columns[1] if len(columns) > 1 else columns[0])
-
-    # Timestamp: prefer explicit timestamp columns, then ocel:timestamp.
-    timestamp_col = _first_match(timestamp_candidates)
-    if timestamp_col is None:
-        timestamp_col = (
-            lower["ocel:timestamp"] if "ocel:timestamp" in lower else None
-        ) or (columns[2] if len(columns) > 2 else columns[-1])
 
     return case_id_col, activity_col, timestamp_col
 
@@ -292,6 +386,7 @@ class ProcessService:
                 case_id_col=request.case_id_col,
                 activity_col=request.activity_col,
                 timestamp_col=request.timestamp_col,
+                timestamp_format=request.timestamp_format,
             )
         except PM4PyAdapterError as exc:
             raise ProcessServiceError(str(exc)) from exc
@@ -340,6 +435,30 @@ class ProcessService:
                 )
             )
 
+        # Check for suspicious data patterns
+        warnings: list[str] = []
+        if total_cases == total_events and total_events > 1:
+            warnings.append(
+                f"Suspicious data pattern: every case contains exactly one event "
+                f"({total_cases} single-event cases). Verify that column '{request.case_id_col}' "
+                "is not a surrogate row identifier."
+            )
+        elif total_cases == 1 and total_events > 5:
+            warnings.append(
+                f"Suspicious data pattern: all {total_events} events belong to a single case. "
+                f"Verify that column '{request.case_id_col}' is a valid case identifier."
+            )
+        if len(unique_activities) == 1:
+            warnings.append(
+                f"Suspicious data pattern: only 1 unique activity ('{unique_activities[0]}') "
+                "found across all events."
+            )
+        if avg_case_duration == 0.0 and total_events > total_cases:
+            warnings.append(
+                "Suspicious timestamp distribution: average case duration is 0.0 hours. "
+                "Verify timestamp precision and column mapping."
+            )
+
         return ProcessAnalysisResult(
             total_cases=total_cases,
             total_events=total_events,
@@ -349,28 +468,74 @@ class ProcessService:
             average_case_duration_hours=avg_case_duration,
             transitions=transitions,
             activity_frequencies=activity_frequencies,
+            warnings=warnings if warnings else None,
         )
 
-    def _resolve_columns(self, source_uri: str) -> tuple[str, str, str]:
+    def _resolve_columns(
+        self,
+        source_uri: str,
+        case_id_col: str | None = None,
+        activity_col: str | None = None,
+        timestamp_col: str | None = None,
+    ) -> tuple[str, str, str]:
         """Resolve case/activity/timestamp columns for an event log.
 
-        Inspects the file header and heuristically detects column names so
-        callers do not need to know exact column spellings in advance.
+        Uses caller-supplied explicit column mappings if provided, and
+        automatically infers any missing column names from the file header.
 
         Args:
             source_uri: Path to the event log file.
+            case_id_col: Optional explicit case ID column name.
+            activity_col: Optional explicit activity column name.
+            timestamp_col: Optional explicit timestamp column name.
 
         Returns:
             Tuple of (case_id_col, activity_col, timestamp_col).
 
         Raises:
-            ProcessServiceError: If column inspection fails.
+            ProcessServiceError: If column inspection fails, required columns are
+                missing, ambiguous, or duplicated.
         """
         try:
             columns = self._columns(source_uri)
         except FileStorageError as exc:
             raise ProcessServiceError(str(exc)) from exc
-        return _detect_columns(columns)
+
+        # If all 3 are explicitly provided:
+        if case_id_col and activity_col and timestamp_col:
+            if len({case_id_col, activity_col, timestamp_col}) != 3:
+                raise ProcessServiceError(
+                    f"Columns must be distinct for case_id, activity, and timestamp. "
+                    f"Received duplicate mappings: case_id='{case_id_col}', "
+                    f"activity='{activity_col}', timestamp='{timestamp_col}'. "
+                    f"Available columns: {columns}"
+                )
+            missing = {case_id_col, activity_col, timestamp_col} - set(columns)
+            if missing:
+                raise ProcessServiceError(
+                    f"Specified column(s) {sorted(missing)} not found in '{source_uri}'. "
+                    f"Available columns: {columns}"
+                )
+            return case_id_col, activity_col, timestamp_col
+
+        inferred_case, inferred_act, inferred_ts = _detect_columns(columns)
+        final_case = case_id_col or inferred_case
+        final_act = activity_col or inferred_act
+        final_ts = timestamp_col or inferred_ts
+
+        if len({final_case, final_act, final_ts}) != 3:
+            raise ProcessServiceError(
+                f"Resolved overlapping or duplicate columns: case_id='{final_case}', "
+                f"activity='{final_act}', timestamp='{final_ts}'. "
+                f"Available columns: {columns}. Please specify distinct column mappings."
+            )
+        missing = {final_case, final_act, final_ts} - set(columns)
+        if missing:
+            raise ProcessServiceError(
+                f"Resolved column(s) {sorted(missing)} not found in '{source_uri}'. "
+                f"Available columns: {columns}"
+            )
+        return final_case, final_act, final_ts
 
     def identify_bottlenecks(self, request: BottleneckRequest) -> BottleneckReport:
         """Identify operational bottlenecks using z-score deviation analysis.
@@ -385,7 +550,10 @@ class ProcessService:
             ProcessServiceError: If loading or mining fails.
         """
         case_id_col, activity_col, timestamp_col = self._resolve_columns(
-            request.source_uri
+            request.source_uri,
+            case_id_col=request.case_id_col,
+            activity_col=request.activity_col,
+            timestamp_col=request.timestamp_col,
         )
 
         analysis_request = ProcessAnalyzeRequest(
@@ -393,6 +561,7 @@ class ProcessService:
             case_id_col=case_id_col,
             activity_col=activity_col,
             timestamp_col=timestamp_col,
+            timestamp_format=request.timestamp_format,
         )
 
         analysis = self.analyze_business_process(analysis_request)
@@ -408,6 +577,7 @@ class ProcessService:
                 source_uri=request.source_uri,
                 total_stages_analyzed=len(analysis.transitions),
                 bottlenecks=[],
+                warnings=analysis.warnings,
             )
 
         baseline_mean = sum(all_means) / len(all_means)
@@ -458,6 +628,7 @@ class ProcessService:
             source_uri=request.source_uri,
             total_stages_analyzed=len(analysis.transitions),
             bottlenecks=bottlenecks,
+            warnings=analysis.warnings,
         )
 
     def score_automation_opportunities(
@@ -487,7 +658,10 @@ class ProcessService:
             ProcessServiceError: If loading or mining fails.
         """
         case_id_col, activity_col, timestamp_col = self._resolve_columns(
-            request.source_uri
+            request.source_uri,
+            case_id_col=request.case_id_col,
+            activity_col=request.activity_col,
+            timestamp_col=request.timestamp_col,
         )
 
         try:
@@ -497,6 +671,7 @@ class ProcessService:
                     case_id_col=case_id_col,
                     activity_col=activity_col,
                     timestamp_col=timestamp_col,
+                    timestamp_format=request.timestamp_format,
                 )
             )
         except ProcessServiceError:
@@ -619,4 +794,5 @@ class ProcessService:
                 "normalized across candidates. Manual effort index = f(frequency, elapsed_stage_duration) normalized. "
                 "Note: Elapsed duration reflects inter-event transition time rather than verified human touch time."
             ),
+            warnings=analysis.warnings,
         )
