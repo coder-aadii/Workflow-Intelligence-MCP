@@ -87,7 +87,7 @@ def register_decision_resources(mcp: Any) -> None:
                     }
                     for entry in recent
                 ]
-        except SQLAlchemyError:
+        except (SQLAlchemyError, OSError):
             entries = []
         return json.dumps(
             {

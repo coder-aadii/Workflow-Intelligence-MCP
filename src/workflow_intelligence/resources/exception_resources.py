@@ -44,7 +44,7 @@ def register_exception_resources(mcp: Any) -> None:
                     }
                     for exc in unresolved
                 ]
-        except SQLAlchemyError:
+        except (SQLAlchemyError, OSError):
             # Database unavailable (e.g. no live PostgreSQL in local/dev).
             # Return an empty active-exceptions queue rather than failing.
             exceptions = []

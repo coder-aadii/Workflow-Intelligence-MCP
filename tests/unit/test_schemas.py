@@ -536,19 +536,41 @@ class TestDecisionSchemas:
         assert da.contribution_percentage == 41.0
         assert da.record_count == 142
 
-    def test_dimension_attribution_rejects_percentage_out_of_range(self) -> None:
-        """DimensionAttribution should reject contribution_percentage outside 0-100."""
+    def test_dimension_attribution_allows_signed_net_percentages(self) -> None:
+        """DimensionAttribution allows negative and >100% net contribution percentages."""
+        da_pos = DimensionAttribution(
+            segment_name="Expedited",
+            contribution_percentage=100.22,
+            delta=55868.25,
+            gross_share_percentage=99.79,
+            record_count=100,
+        )
+        assert da_pos.contribution_percentage == 100.22
+        assert da_pos.delta == 55868.25
+
+        da_neg = DimensionAttribution(
+            segment_name="Standard",
+            contribution_percentage=-0.22,
+            delta=-120.20,
+            gross_share_percentage=0.21,
+            record_count=50,
+        )
+        assert da_neg.contribution_percentage == -0.22
+        assert da_neg.delta == -120.20
+
+    def test_dimension_attribution_validates_gross_share_range(self) -> None:
+        """DimensionAttribution enforces 0-100 on gross_share_percentage."""
         with pytest.raises(ValidationError):
             DimensionAttribution(
                 segment_name="X",
-                contribution_percentage=101.0,
-                record_count=1,
+                contribution_percentage=10.0,
+                gross_share_percentage=105.0,
             )
         with pytest.raises(ValidationError):
             DimensionAttribution(
                 segment_name="X",
-                contribution_percentage=-1.0,
-                record_count=1,
+                contribution_percentage=10.0,
+                gross_share_percentage=-5.0,
             )
 
     def test_decision_brief_inherits_base(self) -> None:

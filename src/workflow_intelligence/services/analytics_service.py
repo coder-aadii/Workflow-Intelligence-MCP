@@ -15,6 +15,7 @@ LLM is ever used to derive numbers. The service provides:
 
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 
@@ -525,9 +526,10 @@ class AnalyticsService:
         """Rank dimensions by their contribution to the period-over-period delta.
 
         Attributes the change to specific dimension values by computing the
-        per-dimension delta between current and baseline periods, then
-        expressing each dimension's absolute delta as a share of the total
-        absolute delta across all dimensions.
+        per-dimension signed delta between current and baseline periods, then
+        expressing each dimension's signed delta as a net contribution of the
+        total net delta (allowing negative and >100% values), along with its
+        gross absolute-change share.
 
         Args:
             table_name: DuckDB table/view to query.
@@ -539,8 +541,7 @@ class AnalyticsService:
             top_n: Maximum number of attributions to return.
 
         Returns:
-            Dimension attributions sorted by contribution percentage
-            descending.
+            Dimension attributions sorted by absolute delta descending.
         """
         self._ensure_registered(table_name)
         current_map = self._per_dimension(
@@ -558,20 +559,29 @@ class AnalyticsService:
             dim: current_map.get(dim, 0.0) - baseline_map.get(dim, 0.0)
             for dim in all_dims
         }
-        total_abs = sum(abs(delta) for delta in deltas.values())
+        total_net_delta = sum(deltas.values())
+        total_abs_delta = sum(abs(delta) for delta in deltas.values())
 
         attributions: list[DimensionAttribution] = []
         for dim, delta in deltas.items():
-            contribution = (abs(delta) / total_abs * 100.0) if total_abs != 0 else 0.0
+            if abs(total_net_delta) >= 1e-9:
+                net_contribution = (delta / total_net_delta) * 100.0
+            else:
+                net_contribution = 0.0
+            gross_share = (
+                (abs(delta) / total_abs_delta * 100.0) if total_abs_delta > 0 else 0.0
+            )
             attributions.append(
                 DimensionAttribution(
                     segment_name=f"{dimension_col} = {dim}",
-                    contribution_percentage=contribution,
+                    contribution_percentage=net_contribution,
                     record_count=count_map.get(dim, 0),
+                    delta=delta,
+                    gross_share_percentage=gross_share,
                 )
             )
 
-        attributions.sort(key=lambda a: a.contribution_percentage, reverse=True)
+        attributions.sort(key=lambda a: abs(a.delta), reverse=True)
         return attributions[:top_n]
 
     def _strip_aggregations(self, expression: str) -> str:
@@ -741,6 +751,167 @@ class AnalyticsService:
         if best[0] == 3 and "department" in text_cols:
             return "department"
         return best[2]
+
+    def classify_metric_type(
+        self, metric_name: str, custom_expression: str | None = None
+    ) -> str:
+        """Classify a metric as 'sum', 'mean', or 'unsupported' for two-sample testing.
+
+        Args:
+            metric_name: Name of the registered or custom metric.
+            custom_expression: Optional custom SQL aggregation expression.
+
+        Returns:
+            'sum', 'mean', or 'unsupported'.
+        """
+        expr = ""
+        if custom_expression:
+            expr = custom_expression.strip()
+        else:
+            try:
+                spec = self._spec(metric_name)
+                expr = spec.get("expression", "").strip()
+            except Exception:
+                return "unsupported"
+
+        expr_upper = expr.upper()
+
+        # Ratios, percentages, counts, or multi-term compound expressions cannot
+        # assume simple two-sample normal distribution variance models.
+        if "/" in expr or "%" in expr or "COUNT(" in expr_upper or "MIN(" in expr_upper or "MAX(" in expr_upper:
+            return "unsupported"
+
+        if expr_upper.startswith("SUM(") and expr_upper.endswith(")"):
+            return "sum"
+
+        if expr_upper.startswith("AVG(") and expr_upper.endswith(")"):
+            return "mean"
+
+        return "unsupported"
+
+    def compute_two_sample_significance(
+        self,
+        metric_name: str,
+        observed_delta: float,
+        current_stats: dict[str, float],
+        baseline_stats: dict[str, float],
+        custom_expression: str | None = None,
+    ) -> dict[str, Any]:
+        """Compute two-sample statistical significance using Welch's t/z methods.
+
+        Accounts for both current and baseline variances and sample sizes.
+        Restricted to supported sum and mean metrics.
+
+        Args:
+            metric_name: Registered or custom metric name.
+            observed_delta: Difference between current and baseline values.
+            current_stats: Dict with 'mean', 'std_dev', 'count' for current period.
+            baseline_stats: Dict with 'mean', 'std_dev', 'count' for baseline period.
+            custom_expression: Optional custom SQL expression.
+
+        Returns:
+            Dictionary with keys:
+            - z_score: float | None
+            - significant: bool
+            - is_testable: bool
+            - metric_type: str ("sum", "mean", "unsupported")
+            - standard_error: float | None
+            - note: str | None
+        """
+        metric_type = self.classify_metric_type(metric_name, custom_expression)
+        n_curr = current_stats.get("count", 0.0)
+        n_base = baseline_stats.get("count", 0.0)
+        s_curr = current_stats.get("std_dev", 0.0)
+        s_base = baseline_stats.get("std_dev", 0.0)
+
+        if metric_type == "unsupported":
+            return {
+                "z_score": None,
+                "significant": False,
+                "is_testable": False,
+                "metric_type": metric_type,
+                "standard_error": None,
+                "note": (
+                    f"Metric '{metric_name}' is classified as '{metric_type}' (e.g. ratio, percentage, count). "
+                    "Two-sample normal variance assumptions are unsupported; "
+                    "reporting descriptive changes without significance claims."
+                ),
+            }
+
+        if n_curr == 0 or n_base == 0:
+            return {
+                "z_score": None,
+                "significant": False,
+                "is_testable": False,
+                "metric_type": metric_type,
+                "standard_error": None,
+                "note": f"Empty sample in comparative periods (current: {int(n_curr)}, baseline: {int(n_base)}).",
+            }
+
+        if n_curr < 2 or n_base < 2:
+            return {
+                "z_score": None,
+                "significant": False,
+                "is_testable": False,
+                "metric_type": metric_type,
+                "standard_error": None,
+                "note": f"Sample size too small (current: {int(n_curr)}, baseline: {int(n_base)}) to reliably estimate variance.",
+            }
+
+        # Check for zero variance
+        if s_curr == 0.0 and s_base == 0.0:
+            if observed_delta == 0.0:
+                return {
+                    "z_score": 0.0,
+                    "significant": False,
+                    "is_testable": True,
+                    "metric_type": metric_type,
+                    "standard_error": 0.0,
+                    "note": "Zero variance with zero delta (no change observed).",
+                }
+            else:
+                return {
+                    "z_score": None,
+                    "significant": False,
+                    "is_testable": False,
+                    "metric_type": metric_type,
+                    "standard_error": 0.0,
+                    "note": (
+                        "Zero within-period variance (constant values across records within periods); "
+                        "standard error cannot be computed from sample variance."
+                    ),
+                }
+
+        # Calculate Standard Error based on metric type
+        if metric_type == "mean":
+            se_squared = (s_curr ** 2) / n_curr + (s_base ** 2) / n_base
+        elif metric_type == "sum":
+            se_squared = n_curr * (s_curr ** 2) + n_base * (s_base ** 2)
+        else:
+            se_squared = 0.0
+
+        if se_squared <= 0.0:
+            return {
+                "z_score": None,
+                "significant": False,
+                "is_testable": False,
+                "metric_type": metric_type,
+                "standard_error": 0.0,
+                "note": "Standard error is non-positive; cannot compute test statistic.",
+            }
+
+        se = math.sqrt(se_squared)
+        z = abs(observed_delta) / se
+        is_sig = bool(z > _Z_SCORE_THRESHOLD)
+
+        return {
+            "z_score": z,
+            "significant": is_sig,
+            "is_testable": True,
+            "metric_type": metric_type,
+            "standard_error": se,
+            "note": None,
+        }
 
     @staticmethod
     def significance_for_delta(

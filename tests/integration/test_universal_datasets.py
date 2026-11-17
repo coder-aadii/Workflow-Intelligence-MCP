@@ -142,7 +142,12 @@ class TestUniversalKPIAnalysis:
         )
         assert explanation.success is True
         assert explanation.data_insufficient is False
-        assert explanation.warning is None
+        assert explanation.warning is not None
+        assert (
+            "unsupported" in explanation.warning.lower()
+            or "descriptive" in explanation.warning.lower()
+        )
+        assert explanation.statistical_significance["is_testable"] == 0.0
         # Dimension should be inferred as plant_id (the only text col besides timeframe)
         assert explanation.dimension == "plant_id"
         assert len(explanation.top_contributors) >= 1

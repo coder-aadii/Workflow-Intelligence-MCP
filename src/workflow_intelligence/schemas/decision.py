@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from .common import BaseMCPResponse
@@ -147,19 +149,29 @@ class DimensionAttribution(BaseModel):
 
     Attributes:
         segment_name: Name of the operational segment.
-        contribution_percentage: Percentage contribution to the deviation (0-100).
+        contribution_percentage: Net percentage contribution to the total delta (can be negative or >100%).
         record_count: Number of records supporting the attribution.
+        delta: Actual signed delta for this segment.
+        gross_share_percentage: Optional gross absolute-change share (0-100%).
     """
 
     segment_name: str = Field(..., description="Name of the operational segment.")
     contribution_percentage: float = Field(
         default=0.0,
-        ge=0,
-        le=100,
-        description="Percentage contribution to the deviation (0-100).",
+        description="Net percentage contribution to the total delta (can be negative or >100%).",
     )
     record_count: int = Field(
         default=0, ge=0, description="Number of records supporting the attribution."
+    )
+    delta: float = Field(
+        default=0.0,
+        description="Actual signed delta for this segment.",
+    )
+    gross_share_percentage: float | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Gross absolute-change share percentage (0-100%).",
     )
 
 
@@ -220,11 +232,11 @@ class DeviationExplanation(BaseMCPResponse):
         default_factory=list,
         description="Dimension attributions ranked by contribution to the delta.",
     )
-    statistical_significance: dict[str, float] = Field(
+    statistical_significance: dict[str, Any] = Field(
         default_factory=dict,
         description=(
             "Deterministic significance indicators (std_dev, z_score, "
-            "significant flag)."
+            "significant flag, standard_error, metric_type)."
         ),
     )
     explanation: str = Field(

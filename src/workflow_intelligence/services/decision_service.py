@@ -140,45 +140,82 @@ class DecisionService:
             request.timeframe_baseline,
             timeframe_column=request.timeframe_column,
         )
-        stats = self._analytics.metric_stats(
+        current_stats = self._analytics.metric_stats(
             table_name,
             request.metric_name,
             request.timeframe_column,
             request.timeframe_current,
         )
-        significance = self._analytics.significance_for_delta(
-            request.observed_delta, 0.0, stats["std_dev"]
+        baseline_stats = self._analytics.metric_stats(
+            table_name,
+            request.metric_name,
+            request.timeframe_column,
+            request.timeframe_baseline,
         )
-
-        data_insufficient = stats["count"] == 0 or not significance["significant"]
-        warning: str | None = None
-        if stats["count"] == 0:
-            warning = (
-                f"No records found for metric '{request.metric_name}' in "
-                f"{request.timeframe_current}; deviation cannot be explained."
-            )
-        elif not significance["significant"]:
-            warning = (
-                f"Observed delta {request.observed_delta} is not statistically "
-                f"significant (z={significance['z_score']:.2f}); interpret "
-                f"with caution."
-            )
+        sig_result = self._analytics.compute_two_sample_significance(
+            metric_name=request.metric_name,
+            observed_delta=request.observed_delta,
+            current_stats=current_stats,
+            baseline_stats=baseline_stats,
+            custom_expression=request.custom_expression,
+        )
 
         if attributions:
             top = attributions[0]
+            action = "increase" if top.delta >= 0 else "reduction"
             driver_text = (
-                f"{top.segment_name} ({top.contribution_percentage:.2f}% of "
-                f"the variance, {top.record_count} records)"
+                f"{top.segment_name} ({action} of {abs(top.delta):.2f}, "
+                f"{top.contribution_percentage:.2f}% net contribution, {top.record_count} records)"
             )
         else:
             driver_text = "no identifiable dimensional driver"
 
-        explanation = (
-            f"The {request.metric_name} deviation of {request.observed_delta} "
-            f"is primarily driven by {driver_text}. "
-            f"Statistical significance: z={significance['z_score']:.2f}, "
-            f"significant={significance['significant']}."
-        )
+        data_insufficient = False
+        warning: str | None = None
+
+        if current_stats["count"] == 0 or baseline_stats["count"] == 0:
+            data_insufficient = True
+            warning = (
+                f"No records found for metric '{request.metric_name}' in "
+                f"comparative periods ({request.timeframe_current}: {int(current_stats['count'])}, "
+                f"{request.timeframe_baseline}: {int(baseline_stats['count'])}); deviation cannot be explained."
+            )
+            explanation = (
+                f"The {request.metric_name} deviation of {request.observed_delta} "
+                f"cannot be explained due to missing records."
+            )
+        elif not sig_result["is_testable"]:
+            data_insufficient = False
+            warning = sig_result.get("note")
+            explanation = (
+                f"The {request.metric_name} deviation of {request.observed_delta} "
+                f"is primarily driven by {driver_text}. Note: {sig_result.get('note')}"
+            )
+        else:
+            z_val = sig_result["z_score"]
+            se_val = sig_result["standard_error"]
+            is_sig = sig_result["significant"]
+            if not is_sig:
+                data_insufficient = True
+                warning = (
+                    f"Observed delta {request.observed_delta} is not statistically "
+                    f"significant (z={z_val:.2f}); interpret with caution."
+                )
+                explanation = (
+                    f"The {request.metric_name} deviation of {request.observed_delta} "
+                    f"is primarily driven by {driver_text}. "
+                    f"Statistical significance: z={z_val:.2f}, "
+                    f"significant=False (SE={se_val:.2f})."
+                )
+            else:
+                data_insufficient = False
+                warning = None
+                explanation = (
+                    f"The {request.metric_name} deviation of {request.observed_delta} "
+                    f"is primarily driven by {driver_text}. "
+                    f"Statistical significance: z={z_val:.2f}, "
+                    f"significant=True (SE={se_val:.2f})."
+                )
 
         return DeviationExplanation(
             metric_name=request.metric_name,
@@ -186,10 +223,17 @@ class DecisionService:
             dimension=request.dimension or dimension_col,
             top_contributors=attributions,
             statistical_significance={
-                "z_score": significance["z_score"],
-                "significant": float(int(significance["significant"])),
-                "std_dev": stats["std_dev"],
-                "record_count": stats["count"],
+                "z_score": sig_result.get("z_score"),
+                "significant": float(int(sig_result.get("significant", False))),
+                "is_testable": float(int(sig_result.get("is_testable", False))),
+                "standard_error": sig_result.get("standard_error"),
+                "metric_type": sig_result.get("metric_type"),
+                "std_dev": current_stats["std_dev"],
+                "current_std_dev": current_stats["std_dev"],
+                "baseline_std_dev": baseline_stats["std_dev"],
+                "record_count": current_stats["count"],
+                "current_count": current_stats["count"],
+                "baseline_count": baseline_stats["count"],
             },
             explanation=explanation,
             data_insufficient=data_insufficient,
@@ -218,8 +262,20 @@ class DecisionService:
             current_quarter: Current period identifier.
             baseline_quarter: Baseline period identifier.
         """
-        eff_source = request.source_uri or source_uri
-        eff_table = _table_name_from_uri(eff_source) if request.source_uri else table_name
+        is_demo_default = request.source_uri is None
+        if not is_demo_default:
+            assert request.source_uri is not None
+            if not Path(request.source_uri).exists():
+                raise DecisionServiceError(
+                    f"Specified source_uri '{request.source_uri}' does not exist. "
+                    "Cannot generate brief from a non-existent dataset."
+                )
+            eff_source = request.source_uri
+            eff_table = _table_name_from_uri(eff_source)
+        else:
+            eff_source = source_uri
+            eff_table = table_name
+
         eff_timeframe_col = request.timeframe_column or timeframe_column
         eff_current = request.timeframe_current or current_quarter
         eff_baseline = request.timeframe_baseline or baseline_quarter
@@ -231,4 +287,5 @@ class DecisionService:
             timeframe_column=eff_timeframe_col,
             current_quarter=eff_current,
             baseline_quarter=eff_baseline,
+            is_demo_default=is_demo_default,
         )

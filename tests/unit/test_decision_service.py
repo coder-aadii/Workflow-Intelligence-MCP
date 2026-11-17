@@ -32,7 +32,10 @@ from workflow_intelligence.services.analytics_service import (
     AnalyticsService,
     AnalyticsServiceError,
 )
-from workflow_intelligence.services.decision_service import DecisionService
+from workflow_intelligence.services.decision_service import (
+    DecisionService,
+    DecisionServiceError,
+)
 from workflow_intelligence.services.reporting_service import ReportingService
 
 PROCUREMENT_CSV = "sample-data/procurement_costs.csv"
@@ -164,24 +167,33 @@ class TestAnalyticsService:
         q3 = df[df["quarter"] == "Q3"].groupby("department")["processing_cost"].sum()
         q2 = df[df["quarter"] == "Q2"].groupby("department")["processing_cost"].sum()
         deltas = {
-            dept: abs(q3.get(dept, 0) - q2.get(dept, 0))
+            dept: q3.get(dept, 0) - q2.get(dept, 0)
             for dept in set(q3.index) | set(q2.index)
         }
-        total = sum(deltas.values())
+        total_net = sum(deltas.values())
+        total_abs = sum(abs(d) for d in deltas.values())
         seen = set()
         for a in attributions:
             dept = a.segment_name.split(" = ")[1]
             seen.add(dept)
-            expected = deltas.get(dept, 0) / total * 100 if total != 0 else 0.0
-            assert abs(a.contribution_percentage - expected) < 1e-6
+            expected_net = (
+                deltas.get(dept, 0) / total_net * 100 if total_net != 0 else 0.0
+            )
+            expected_gross = (
+                abs(deltas.get(dept, 0)) / total_abs * 100 if total_abs != 0 else 0.0
+            )
+            assert abs(a.contribution_percentage - expected_net) < 1e-6
+            assert abs(a.delta - deltas.get(dept, 0)) < 1e-6
+            assert a.gross_share_percentage is not None
+            assert abs(a.gross_share_percentage - expected_gross) < 1e-6
             assert a.record_count == len(
                 df[(df["quarter"] == "Q3") & (df["department"] == dept)]
             )
         assert seen == set(deltas)
-        # Contributions sum to 100% and are sorted descending.
+        # Net contributions sum to 100% and are sorted descending by absolute delta.
         assert abs(sum(a.contribution_percentage for a in attributions) - 100.0) < 1e-6
-        percents = [a.contribution_percentage for a in attributions]
-        assert percents == sorted(percents, reverse=True)
+        abs_deltas = [abs(a.delta) for a in attributions]
+        assert abs_deltas == sorted(abs_deltas, reverse=True)
 
     def test_rank_dimensions_matches_pandas(
         self, analytics_service: AnalyticsService
@@ -199,22 +211,31 @@ class TestAnalyticsService:
         q3 = df[df["quarter"] == "Q3"].groupby("department")["order_id"].count()
         q2 = df[df["quarter"] == "Q2"].groupby("department")["order_id"].count()
         deltas = {
-            dept: abs(q3.get(dept, 0) - q2.get(dept, 0))
+            dept: q3.get(dept, 0) - q2.get(dept, 0)
             for dept in set(q3.index) | set(q2.index)
         }
-        total = sum(deltas.values())
+        total_net = sum(deltas.values())
+        total_abs = sum(abs(d) for d in deltas.values())
         seen = set()
         for a in attributions:
             dept = a.segment_name.split(" = ")[1]
             seen.add(dept)
-            expected = deltas.get(dept, 0) / total * 100 if total != 0 else 0.0
-            assert abs(a.contribution_percentage - expected) < 1e-6
+            expected_net = (
+                deltas.get(dept, 0) / total_net * 100 if total_net != 0 else 0.0
+            )
+            expected_gross = (
+                abs(deltas.get(dept, 0)) / total_abs * 100 if total_abs != 0 else 0.0
+            )
+            assert abs(a.contribution_percentage - expected_net) < 1e-6
+            assert abs(a.delta - deltas.get(dept, 0)) < 1e-6
+            assert a.gross_share_percentage is not None
+            assert abs(a.gross_share_percentage - expected_gross) < 1e-6
             assert a.record_count == int(q3.get(dept, 0))
         assert seen == set(deltas)
-        percents = [a.contribution_percentage for a in attributions]
-        assert percents == sorted(percents, reverse=True)
-        if total != 0:
-            assert abs(sum(percents) - 100.0) < 1e-6
+        abs_deltas = [abs(a.delta) for a in attributions]
+        assert abs_deltas == sorted(abs_deltas, reverse=True)
+        if total_net != 0:
+            assert abs(sum(a.contribution_percentage for a in attributions) - 100.0) < 1e-6
 
     def test_metric_stats(self, analytics_service: AnalyticsService) -> None:
         stats = analytics_service.metric_stats(
@@ -435,7 +456,7 @@ class TestDecisionService:
                     timeframe_column="quarter",
                     timeframe_current="Q3",
                     timeframe_baseline="Q2",
-                    observed_delta=400.0,
+                    observed_delta=500.0,
                     dimension=None,
                 )
             )
@@ -595,3 +616,302 @@ class TestReportingService:
         )
         with pytest.raises(AnalyticsServiceError):
             reporting_service.generate_brief(request)
+
+
+class TestStatisticalSignificanceAndDatasetSelection:
+    """Regression test suite for two-sample significance tests and dataset provenance."""
+
+    PROCUREMENT_KPIS = "sample-data/procurement_kpis.csv"
+    EXPECTED_KPIS_SHA256 = (
+        "980297dff2a6d33e7210f6fc789384660b602f208b0f99915872d91379efa217"
+    )
+
+    def test_procurement_kpis_brief_exact_totals_and_provenance(self) -> None:
+        service = DecisionService()
+        req = DecisionBriefRequest(
+            topic="Procurement Cost Analysis",
+            metric_ids=["processing_cost"],
+            source_uri=self.PROCUREMENT_KPIS,
+            timeframe_column="timeframe",
+            timeframe_current="Q3",
+            timeframe_baseline="Q2",
+        )
+        brief = service.generate_brief(req)
+        assert brief.success is True
+        assert len(brief.findings) == 1
+        finding = brief.findings[0]
+        assert abs(finding.baseline_value - 110252.45) < 1e-2
+        assert abs(finding.current_value - 166000.50) < 1e-2
+        assert abs(finding.absolute_variance - 55748.05) < 1e-2
+        assert abs(finding.relative_variance_percentage - 50.564) < 1e-2
+
+        # Verify provenance
+        assert any(f"source={self.PROCUREMENT_KPIS}" in link for link in brief.provenance_links)
+        assert any(f"sha256={self.EXPECTED_KPIS_SHA256}" in link for link in brief.provenance_links)
+        assert any("dataset_mode=explicit_source" in link for link in brief.provenance_links)
+
+    def test_procurement_kpis_sum_metric_significance_audit(self) -> None:
+        service = DecisionService()
+        req = KPIExplanationRequest(
+            metric_name="processing_cost",
+            source_uri=self.PROCUREMENT_KPIS,
+            timeframe_column="timeframe",
+            timeframe_current="Q3",
+            timeframe_baseline="Q2",
+            observed_delta=55748.05,
+            dimension="shipping_method",
+        )
+        explanation = service.explain_kpi_deviation(req)
+        assert explanation.success is True
+        sig = explanation.statistical_significance
+        assert sig["significant"] == 1.0
+        assert sig["is_testable"] == 1.0
+        assert sig["metric_type"] == "sum"
+        # Must NOT be 589.64! Must be ~17.92
+        assert abs(sig["z_score"] - 17.92) < 0.05
+        assert abs(sig["standard_error"] - 3110.18) < 1.0
+        assert explanation.data_insufficient is False
+        assert explanation.warning is None
+
+    def test_mean_metric_two_sample_significance(self) -> None:
+        service = DecisionService()
+        req = KPIExplanationRequest(
+            metric_name="avg_processing_cost",
+            source_uri=self.PROCUREMENT_KPIS,
+            timeframe_column="timeframe",
+            timeframe_current="Q3",
+            timeframe_baseline="Q2",
+            observed_delta=74.330733,
+            dimension="shipping_method",
+        )
+        explanation = service.explain_kpi_deviation(req)
+        assert explanation.success is True
+        sig = explanation.statistical_significance
+        assert sig["metric_type"] == "mean"
+        assert sig["significant"] == 1.0
+        assert abs(sig["z_score"] - 17.92) < 0.05
+        assert abs(sig["standard_error"] - 4.15) < 0.05
+
+    def test_unsupported_metric_type_reported_descriptively(self) -> None:
+        service = DecisionService()
+        req = KPIExplanationRequest(
+            metric_name="expedited_share_percentage",
+            source_uri=self.PROCUREMENT_KPIS,
+            timeframe_column="timeframe",
+            timeframe_current="Q3",
+            timeframe_baseline="Q2",
+            observed_delta=10.0,
+        )
+        explanation = service.explain_kpi_deviation(req)
+        assert explanation.success is True
+        sig = explanation.statistical_significance
+        assert sig["metric_type"] == "unsupported"
+        assert sig["is_testable"] == 0.0
+        assert sig["z_score"] is None
+        assert sig["significant"] == 0.0
+        assert explanation.warning is not None
+        assert "descriptive changes without significance claims" in explanation.warning
+
+    def test_zero_variance_with_zero_delta(self) -> None:
+        rows = [
+            {"quarter": "Q2", "dept": "D1", "processing_cost": 100},
+            {"quarter": "Q2", "dept": "D1", "processing_cost": 100},
+            {"quarter": "Q3", "dept": "D1", "processing_cost": 100},
+            {"quarter": "Q3", "dept": "D1", "processing_cost": 100},
+        ]
+        fd, path = tempfile.mkstemp(suffix=".csv")
+        with os.fdopen(fd, "w") as fh:
+            pd.DataFrame(rows).to_csv(fh, index=False)
+        try:
+            svc = DecisionService()
+            explanation = svc.explain_kpi_deviation(
+                KPIExplanationRequest(
+                    metric_name="processing_cost",
+                    source_uri=path,
+                    timeframe_column="quarter",
+                    timeframe_current="Q3",
+                    timeframe_baseline="Q2",
+                    observed_delta=0.0,
+                    dimension="dept",
+                )
+            )
+            sig = explanation.statistical_significance
+            assert sig["is_testable"] == 1.0
+            assert sig["z_score"] == 0.0
+            assert sig["significant"] == 0.0
+        finally:
+            os.remove(path)
+
+    def test_zero_within_period_variance_with_nonzero_delta(self) -> None:
+        rows = [
+            {"quarter": "Q2", "dept": "D1", "processing_cost": 100},
+            {"quarter": "Q2", "dept": "D1", "processing_cost": 100},
+            {"quarter": "Q3", "dept": "D1", "processing_cost": 200},
+            {"quarter": "Q3", "dept": "D1", "processing_cost": 200},
+        ]
+        fd, path = tempfile.mkstemp(suffix=".csv")
+        with os.fdopen(fd, "w") as fh:
+            pd.DataFrame(rows).to_csv(fh, index=False)
+        try:
+            svc = DecisionService()
+            explanation = svc.explain_kpi_deviation(
+                KPIExplanationRequest(
+                    metric_name="processing_cost",
+                    source_uri=path,
+                    timeframe_column="quarter",
+                    timeframe_current="Q3",
+                    timeframe_baseline="Q2",
+                    observed_delta=200.0,
+                    dimension="dept",
+                )
+            )
+            sig = explanation.statistical_significance
+            assert sig["is_testable"] == 0.0
+            assert sig["z_score"] is None
+            assert sig["significant"] == 0.0
+            assert explanation.warning is not None
+            assert "Zero within-period variance" in explanation.warning
+        finally:
+            os.remove(path)
+
+    def test_empty_sample_period_fails_gracefully(self) -> None:
+        rows = [
+            {"quarter": "Q2", "dept": "D1", "processing_cost": 100},
+            {"quarter": "Q2", "dept": "D1", "processing_cost": 150},
+        ]
+        fd, path = tempfile.mkstemp(suffix=".csv")
+        with os.fdopen(fd, "w") as fh:
+            pd.DataFrame(rows).to_csv(fh, index=False)
+        try:
+            svc = DecisionService()
+            explanation = svc.explain_kpi_deviation(
+                KPIExplanationRequest(
+                    metric_name="processing_cost",
+                    source_uri=path,
+                    timeframe_column="quarter",
+                    timeframe_current="Q3",
+                    timeframe_baseline="Q2",
+                    observed_delta=100.0,
+                    dimension="dept",
+                )
+            )
+            assert explanation.data_insufficient is True
+            assert explanation.warning is not None
+            assert "No records found" in explanation.warning
+        finally:
+            os.remove(path)
+
+    def test_nonexistent_dataset_raises_without_silent_fallback(self) -> None:
+        svc = DecisionService()
+        req = DecisionBriefRequest(
+            topic="Missing Data",
+            metric_ids=["processing_cost"],
+            source_uri="sample-data/nonexistent_file_abc.csv",
+        )
+        with pytest.raises(DecisionServiceError) as exc_info:
+            svc.generate_brief(req)
+        assert "does not exist" in str(exc_info.value)
+
+    def test_default_demo_dataset_marked_in_provenance(self) -> None:
+        svc = DecisionService()
+        req = DecisionBriefRequest(
+            topic="Demo Analysis",
+            metric_ids=["processing_cost"],
+            source_uri=None,
+        )
+        brief = svc.generate_brief(req)
+        assert brief.success is True
+        assert any("dataset_mode=default_demo_dataset" in link for link in brief.provenance_links)
+        assert any("notice=Using default demo dataset" in link for link in brief.provenance_links)
+
+
+class TestDimensionalAttribution:
+    """Tests for signed dimensional attribution, net contribution, and safe zero-net handling."""
+
+    def test_procurement_kpi_shipping_method_offsetting_segments(self) -> None:
+        """Verify procurement_kpis.csv: Expedited +55868.25 (+100.22%), Standard -120.20 (-0.22%)."""
+        analytics = AnalyticsService()
+        analytics.use_source("sample-data/procurement_kpis.csv", "proc_kpi")
+        analytics.register_source()
+        attributions = analytics.rank_dimensions(
+            "proc_kpi",
+            "processing_cost",
+            "shipping_method",
+            "Q3",
+            "Q2",
+            timeframe_column="timeframe",
+        )
+        assert len(attributions) == 2
+        expedited = next(a for a in attributions if "Expedited" in a.segment_name)
+        standard = next(a for a in attributions if "Standard" in a.segment_name)
+
+        assert abs(expedited.delta - 55868.25) < 1e-2
+        assert abs(standard.delta - (-120.20)) < 1e-2
+        net_delta = expedited.delta + standard.delta
+        assert abs(net_delta - 55748.05) < 1e-2
+
+        # Net contribution percentage: Expedited ~ 100.22%, Standard ~ -0.22%
+        assert abs(expedited.contribution_percentage - 100.2156) < 1e-2
+        assert abs(standard.contribution_percentage - (-0.2156)) < 1e-2
+        assert abs(expedited.contribution_percentage + standard.contribution_percentage - 100.0) < 1e-4
+
+        # Gross absolute-change share percentage
+        total_abs = abs(expedited.delta) + abs(standard.delta)
+        assert abs(expedited.gross_share_percentage - (55868.25 / total_abs * 100)) < 1e-2
+        assert abs(standard.gross_share_percentage - (120.20 / total_abs * 100)) < 1e-2
+
+        # Sorted by absolute delta descending (Expedited first)
+        assert attributions[0] == expedited
+
+    def test_zero_net_delta_safely_handled_without_division_by_zero(self) -> None:
+        """Zero net delta handles division by zero safely and reports gross share."""
+        rows = [
+            # Baseline: D1=100, D2=200 -> total=300
+            {"timeframe": "Q2", "dept": "D1", "processing_cost": 100},
+            {"timeframe": "Q2", "dept": "D2", "processing_cost": 200},
+            # Current: D1=200 (+100), D2=100 (-100) -> total=300, net delta = 0
+            {"timeframe": "Q3", "dept": "D1", "processing_cost": 200},
+            {"timeframe": "Q3", "dept": "D2", "processing_cost": 100},
+        ]
+        fd, path = tempfile.mkstemp(suffix=".csv")
+        with os.fdopen(fd, "w") as fh:
+            pd.DataFrame(rows).to_csv(fh, index=False)
+        try:
+            analytics = AnalyticsService()
+            analytics.use_source(path, "zero_net_test")
+            analytics.register_source()
+            attributions = analytics.rank_dimensions(
+                "zero_net_test",
+                "processing_cost",
+                "dept",
+                "Q3",
+                "Q2",
+                timeframe_column="timeframe",
+            )
+            assert len(attributions) == 2
+            for a in attributions:
+                assert a.contribution_percentage == 0.0
+                assert a.gross_share_percentage == 50.0
+                assert abs(a.delta) == 100.0
+        finally:
+            os.remove(path)
+
+    def test_decision_brief_describes_increases_and_reductions_accurately(self) -> None:
+        """Decision brief executive summary and recommendations describe increases vs reductions accurately."""
+        svc = DecisionService()
+        req = DecisionBriefRequest(
+            topic="Procurement Cost Drivers",
+            metric_ids=["processing_cost"],
+            source_uri="sample-data/procurement_kpis.csv",
+            timeframe_column="timeframe",
+            timeframe_current="Q3",
+            timeframe_baseline="Q2",
+        )
+        brief = svc.generate_brief(req)
+        assert brief.success is True
+        summary = brief.executive_summary
+        assert "increase of 55868.25" in summary or "55,868.25" in summary
+        assert "reduction of 120.20" in summary or "-120.20" in summary
+        assert "100.22% net contribution" in summary
+        assert "-0.22% net contribution" in summary
+

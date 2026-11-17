@@ -17,6 +17,8 @@ statistics only.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from workflow_intelligence.adapters.analytics.duckdb_adapter import DuckDBAdapter
 from workflow_intelligence.schemas.decision import (
     DecisionBrief,
@@ -47,6 +49,7 @@ class ReportingService:
         timeframe_column: str = "quarter",
         current_quarter: str = DEFAULT_CURRENT_QUARTER,
         baseline_quarter: str = DEFAULT_BASELINE_QUARTER,
+        is_demo_default: bool = False,
     ) -> DecisionBrief:
         """Generate a structured decision brief for a topic and metric set.
 
@@ -57,6 +60,7 @@ class ReportingService:
             timeframe_column: Column used for period filtering.
             current_quarter: Current period identifier.
             baseline_quarter: Baseline period identifier.
+            is_demo_default: Whether the source URI is an intentional demo default.
 
         Returns:
             A populated :class:`DecisionBrief` with findings, attributions,
@@ -64,8 +68,14 @@ class ReportingService:
 
         Raises:
             AnalyticsServiceError: If any metric id is unknown or the source
-                cannot be registered.
+                cannot be registered or found.
         """
+        if not Path(source_uri).exists():
+            from workflow_intelligence.services.analytics_service import AnalyticsServiceError
+            raise AnalyticsServiceError(
+                f"Source file '{source_uri}' does not exist. Cannot generate brief."
+            )
+
         self._analytics.use_source(source_uri, table_name)
         self._analytics._ensure_registered(table_name)
 
@@ -79,12 +89,16 @@ class ReportingService:
             available_cols = []
 
         if available_cols and timeframe_column not in available_cols:
-            from workflow_intelligence.services.analytics_service import AnalyticsServiceError
-
-            raise AnalyticsServiceError(
-                f"Timeframe column '{timeframe_column}' not found in '{source_uri}'. "
-                f"Available columns: {available_cols}. Please specify a valid timeframe column."
-            )
+            if "timeframe" in available_cols:
+                timeframe_column = "timeframe"
+            elif "quarter" in available_cols:
+                timeframe_column = "quarter"
+            else:
+                from workflow_intelligence.services.analytics_service import AnalyticsServiceError
+                raise AnalyticsServiceError(
+                    f"Timeframe column '{timeframe_column}' not found in '{source_uri}'. "
+                    f"Available columns: {available_cols}. Please specify a valid timeframe column."
+                )
 
         # Validate every metric id against the registry before computing
         # anything, so we never fabricate a metric that does not exist.
@@ -120,6 +134,12 @@ class ReportingService:
 
         file_hash = DuckDBAdapter.file_hash(source_uri)
         file_size = DuckDBAdapter.file_size(source_uri)
+        if not file_hash:
+            from workflow_intelligence.services.analytics_service import AnalyticsServiceError
+            raise AnalyticsServiceError(
+                f"Failed to compute SHA-256 hash for effective source '{source_uri}'."
+            )
+
         provenance_links = [
             f"source={source_uri}",
             f"sha256={file_hash}",
@@ -127,7 +147,12 @@ class ReportingService:
             f"table={table_name}",
             f"current_period={current_quarter}",
             f"baseline_period={baseline_quarter}",
+            f"dataset_mode={'default_demo_dataset' if is_demo_default else 'explicit_source'}",
         ]
+        if is_demo_default:
+            provenance_links.append(
+                f"notice=Using default demo dataset '{DEFAULT_SOURCE_URI}' because no source_uri was specified."
+            )
 
         executive_summary = self._build_executive_summary(
             request.topic, findings, attributions, current_quarter, baseline_quarter
@@ -190,9 +215,10 @@ class ReportingService:
             lines.append("No dimensional drivers identified.")
         else:
             for a in attributions:
+                impact = "increase" if a.delta >= 0 else "reduction"
                 lines.append(
-                    f"- {a.segment_name}: {a.contribution_percentage:.2f}% "
-                    f"of the variance ({a.record_count} records)."
+                    f"- {a.segment_name}: {impact} of {abs(a.delta):.2f} "
+                    f"({a.contribution_percentage:.2f}% net contribution, {a.record_count} records)."
                 )
         lines.append("")
         lines.append("## Provenance Footnotes")
@@ -230,8 +256,9 @@ class ReportingService:
             )
         if attributions:
             top_driver = attributions[0]
+            action = "an increase" if top_driver.delta >= 0 else "a reduction"
             lines.append(
-                f"Prioritize {top_driver.segment_name} which accounts for "
-                f"{top_driver.contribution_percentage:.2f}% of the observed variance."
+                f"Prioritize {top_driver.segment_name} which accounts for {action} of "
+                f"{abs(top_driver.delta):.2f} ({top_driver.contribution_percentage:.2f}% net contribution)."
             )
         return lines
