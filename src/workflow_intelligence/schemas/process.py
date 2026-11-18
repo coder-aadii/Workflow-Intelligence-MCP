@@ -233,8 +233,15 @@ class BottleneckItem(BaseModel):
     z_score: float = Field(
         default=0.0, description="Z-score of the delay relative to baseline."
     )
+    affected_transition_count: int = Field(
+        default=0,
+        ge=0,
+        description="Number of observed transitions affected by this bottleneck.",
+    )
     affected_case_count: int = Field(
-        default=0, ge=0, description="Number of cases affected by this bottleneck."
+        default=0,
+        ge=0,
+        description="Alias for affected_transition_count for backwards compatibility.",
     )
     primary_contributor: str | None = Field(
         default=None, description="Optional primary contributing factor."

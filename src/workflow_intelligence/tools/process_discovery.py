@@ -10,6 +10,10 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from workflow_intelligence.observability.tracing import (
+    SPAN_MCP_TOOL_INVOKE,
+    trace_span,
+)
 from workflow_intelligence.schemas.process import (
     AutomationScoreRequest,
     BottleneckRequest,
@@ -27,6 +31,7 @@ def register_process_tools(mcp: FastMCP, service: ProcessService) -> None:
     """
 
     @mcp.tool()
+    @trace_span(SPAN_MCP_TOOL_INVOKE)
     async def process_analyze_business_process(
         source_uri: str,
         case_id_col: str,
@@ -57,6 +62,7 @@ def register_process_tools(mcp: FastMCP, service: ProcessService) -> None:
         return result.model_dump()
 
     @mcp.tool()
+    @trace_span(SPAN_MCP_TOOL_INVOKE)
     async def process_identify_bottlenecks(
         source_uri: str,
         threshold_std_dev: float = 2.0,
@@ -93,6 +99,7 @@ def register_process_tools(mcp: FastMCP, service: ProcessService) -> None:
         return result.model_dump()
 
     @mcp.tool()
+    @trace_span(SPAN_MCP_TOOL_INVOKE)
     async def process_score_automation_opportunities(
         source_uri: str,
         min_frequency: int = 10,

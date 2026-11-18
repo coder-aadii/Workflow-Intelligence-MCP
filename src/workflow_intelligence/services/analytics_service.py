@@ -278,6 +278,19 @@ def _validate_custom_expression(expression: str) -> None:
         )
 
 
+_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def validate_sql_identifier(identifier: str, field_name: str = "identifier") -> str:
+    """Validate that a string is a safe SQL identifier."""
+    if not isinstance(identifier, str) or not _IDENTIFIER_PATTERN.fullmatch(identifier):
+        raise AnalyticsServiceError(
+            f"Invalid SQL {field_name}: {identifier!r}. "
+            "Identifiers must start with a letter or underscore and contain only alphanumeric characters and underscores."
+        )
+    return identifier
+
+
 class AnalyticsService:
     """Deterministic KPI analytics backed by DuckDB."""
 
@@ -386,9 +399,10 @@ class AnalyticsService:
         Raises:
             AnalyticsServiceError: If the metric is unknown or the query fails.
         """
+        validate_sql_identifier(table_name, "table_name")
         self._ensure_registered(table_name)
         expression = self._expression(metric_name)
-        sql = f"SELECT {expression} FROM {table_name}"
+        sql = f'SELECT {expression} FROM "{table_name}"'
         if where_sql:
             sql += f" WHERE {where_sql}"
         try:
@@ -422,8 +436,9 @@ class AnalyticsService:
             The metric value as a float (0.0 when no rows match).
         """
         _validate_custom_expression(expression)
+        validate_sql_identifier(table_name, "table_name")
         self._ensure_registered(table_name)
-        sql = f"SELECT {expression} FROM {table_name}"
+        sql = f'SELECT {expression} FROM "{table_name}"'
         if where_sql:
             sql += f" WHERE {where_sql}"
         try:
@@ -436,7 +451,18 @@ class AnalyticsService:
             return 0.0
         return float(rows[0][0])
 
+    def get_table_columns(self, table_name: str) -> list[str]:
+        """Return the column names of a registered table."""
+        validate_sql_identifier(table_name, "table_name")
+        self._ensure_registered(table_name)
+        rows = self._adapter.execute_query(
+            "SELECT column_name FROM information_schema.columns "
+            f"WHERE table_name = '{table_name}' ORDER BY ordinal_position"
+        )
+        return [str(r[0]) for r in rows]
+
     def _ensure_registered(self, table_name: str) -> None:
+        validate_sql_identifier(table_name, "table_name")
         if table_name == self._table_name and not self._registered:
             self.register_source()
 
@@ -461,11 +487,13 @@ class AnalyticsService:
             A :class:`MetricComparison` with baseline, current, absolute and
             relative variance.
         """
+        validate_sql_identifier(table_name, "table_name")
+        validate_sql_identifier(timeframe_column, "timeframe_column")
         current = self.compute_metric(
-            table_name, metric_name, f"{timeframe_column} = ?", [current_timeframe]
+            table_name, metric_name, f'"{timeframe_column}" = ?', [current_timeframe]
         )
         baseline = self.compute_metric(
-            table_name, metric_name, f"{timeframe_column} = ?", [baseline_timeframe]
+            table_name, metric_name, f'"{timeframe_column}" = ?', [baseline_timeframe]
         )
         absolute_variance = current - baseline
         relative = (absolute_variance / baseline * 100.0) if baseline != 0 else 0.0
@@ -485,10 +513,13 @@ class AnalyticsService:
         timeframe_column: str,
         timeframe: str,
     ) -> dict[str, float]:
+        validate_sql_identifier(table_name, "table_name")
+        validate_sql_identifier(dimension_col, "dimension")
+        validate_sql_identifier(timeframe_column, "timeframe_column")
         expression = self._expression(metric_name)
         sql = (
-            f"SELECT {dimension_col}, {expression} FROM {table_name} "
-            f"WHERE {timeframe_column} = ? GROUP BY {dimension_col}"
+            f'SELECT "{dimension_col}", {expression} FROM "{table_name}" '
+            f'WHERE "{timeframe_column}" = ? GROUP BY "{dimension_col}"'
         )
         rows = self._adapter.execute_query(
             sql, parameters=[timeframe], time_limit_ms=5000
@@ -504,9 +535,12 @@ class AnalyticsService:
         timeframe_column: str,
         timeframe: str,
     ) -> dict[str, int]:
+        validate_sql_identifier(table_name, "table_name")
+        validate_sql_identifier(dimension_col, "dimension")
+        validate_sql_identifier(timeframe_column, "timeframe_column")
         sql = (
-            f"SELECT {dimension_col}, COUNT(*) FROM {table_name} "
-            f"WHERE {timeframe_column} = ? GROUP BY {dimension_col}"
+            f'SELECT "{dimension_col}", COUNT(*) FROM "{table_name}" '
+            f'WHERE "{timeframe_column}" = ? GROUP BY "{dimension_col}"'
         )
         rows = self._adapter.execute_query(
             sql, parameters=[timeframe], time_limit_ms=5000
@@ -543,7 +577,23 @@ class AnalyticsService:
         Returns:
             Dimension attributions sorted by absolute delta descending.
         """
+        validate_sql_identifier(table_name, "table_name")
+        validate_sql_identifier(dimension_col, "dimension")
+        validate_sql_identifier(timeframe_column, "timeframe_column")
         self._ensure_registered(table_name)
+
+        available_cols = self.get_table_columns(table_name)
+        if available_cols:
+            if dimension_col not in available_cols:
+                raise AnalyticsServiceError(
+                    f"Dimension column '{dimension_col}' not found in '{table_name}'. "
+                    f"Available columns: {available_cols}."
+                )
+            if timeframe_column not in available_cols:
+                raise AnalyticsServiceError(
+                    f"Timeframe column '{timeframe_column}' not found in '{table_name}'. "
+                    f"Available columns: {available_cols}."
+                )
         current_map = self._per_dimension(
             table_name, metric_name, dimension_col, timeframe_column, current_timeframe
         )
@@ -618,6 +668,8 @@ class AnalyticsService:
         Returns:
             Dictionary with keys ``mean``, ``std_dev``, ``count``.
         """
+        validate_sql_identifier(table_name, "table_name")
+        validate_sql_identifier(timeframe_column, "timeframe_column")
         self._ensure_registered(table_name)
         spec = self._spec(metric_name)
         is_custom = metric_name in self._custom_metrics
@@ -628,8 +680,8 @@ class AnalyticsService:
         else:
             stats_expr = column
         sql = (
-            f"SELECT AVG({stats_expr}), STDDEV({stats_expr}), COUNT(*) "
-            f"FROM {table_name} WHERE {timeframe_column} = ?"
+            f'SELECT AVG({stats_expr}), STDDEV({stats_expr}), COUNT(*) '
+            f'FROM "{table_name}" WHERE "{timeframe_column}" = ?'
         )
         try:
             rows = self._adapter.execute_query(
@@ -667,6 +719,8 @@ class AnalyticsService:
         Raises:
             AnalyticsServiceError: If no suitable categorical column can be found.
         """
+        validate_sql_identifier(table_name, "table_name")
+        validate_sql_identifier(timeframe_column, "timeframe_column")
         self._ensure_registered(table_name)
         sql = (
             "SELECT column_name FROM information_schema.columns "
@@ -917,7 +971,11 @@ class AnalyticsService:
     def significance_for_delta(
         current: float, baseline: float, std_dev: float
     ) -> dict[str, float | bool]:
-        """Compute a z-score and significance flag for an observed delta.
+        """Compute a heuristic z-score and significance indicator for an observed delta.
+
+        Computes the ratio of the delta to the within-period standard deviation.
+        For rigorous two-sample hypothesis testing accounting for both period
+        variances and sample sizes, use :meth:`compute_two_sample_significance`.
 
         Args:
             current: Current period value.

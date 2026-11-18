@@ -386,6 +386,7 @@ class ExceptionService:
     ) -> ExceptionInvestigationResult:
         """Asynchronous investigation handler with transactional database persistence."""
         result = self.investigate_failure(request)
+        initial_exception_id = result.exception_id
         sanitized_payload = sanitize_payload(request.failure_payload)
 
         try:
@@ -435,6 +436,16 @@ class ExceptionService:
                             root_cause=result.classification_reason,
                             payload=sanitized_payload,
                         )
+
+                    # Reconcile in-memory cache if database remapped the ID
+                    if result.exception_id != initial_exception_id:
+                        if initial_exception_id in self._in_memory_exceptions:
+                            in_mem_entry = self._in_memory_exceptions.pop(initial_exception_id)
+                            in_mem_entry["id"] = result.exception_id
+                            self._in_memory_exceptions[result.exception_id] = in_mem_entry
+                        for audit in self._in_memory_audit:
+                            if audit.get("details", {}).get("exception_id") == initial_exception_id:
+                                audit["details"]["exception_id"] = result.exception_id
 
                     # Record immutable audit entry
                     await audit_repo.create_audit_entry(
@@ -565,6 +576,22 @@ class ExceptionService:
                                 },
                                 correlation_id=record.workflow_id,
                             )
+                            if request.exception_id in self._in_memory_exceptions:
+                                self._in_memory_exceptions[request.exception_id]["is_resolved"] = True
+
+                            return ResolutionPlan(
+                                exception_id=request.exception_id,
+                                remediation_action=remediation_action,
+                                auto_resolve=True,
+                                required_approval_tier=approval_tier,
+                            )
+
+                        return ResolutionPlan(
+                            exception_id=request.exception_id,
+                            remediation_action=remediation_action,
+                            auto_resolve=False,
+                            required_approval_tier=approval_tier,
+                        )
         except Exception as exc:
             if isinstance(exc, ExceptionServiceError):
                 raise
@@ -679,37 +706,37 @@ class ExceptionService:
 
         try:
             async for session in get_db_session():
-                audit_repo = AuditRepository(session)
-                wf_repo = WorkflowRepository(session)
-
-                # Check for existing duplicate escalation
-                prior_entries = await audit_repo.get_by_correlation_id(case_id)
-                for entry in prior_entries:
-                    if (
-                        entry.action_name == "exception_escalate_case"
-                        and entry.details_json
-                        and entry.details_json.get("target_department")
-                        == target_department
-                    ):
-                        existing_ticket = entry.details_json.get(
-                            "ticket_id", "TKT-EXISTING"
-                        )
-                        return EscalationResult(
-                            ticket_id=existing_ticket,
-                            routed_department=target_department,
-                            priority=priority,
-                            audit_narrative=(
-                                f"Case {case_id} is already escalated to {target_department} "
-                                f"under ticket {existing_ticket}. Duplicate escalation suppressed."
-                            ),
-                        )
-
-                # Assign tracking ticket ID
-                self._exception_counter += 1
-                ticket_id = f"TKT-{self._exception_counter:04d}"
-                timestamp = datetime.now(UTC).isoformat()
-
                 async with session.begin():
+                    audit_repo = AuditRepository(session)
+                    wf_repo = WorkflowRepository(session)
+
+                    # Check for existing duplicate escalation
+                    prior_entries = await audit_repo.get_by_correlation_id(case_id)
+                    for entry in prior_entries:
+                        if (
+                            entry.action_name == "exception_escalate_case"
+                            and entry.details_json
+                            and entry.details_json.get("target_department")
+                            == target_department
+                        ):
+                            existing_ticket = entry.details_json.get(
+                                "ticket_id", "TKT-EXISTING"
+                            )
+                            return EscalationResult(
+                                ticket_id=existing_ticket,
+                                routed_department=target_department,
+                                priority=priority,
+                                audit_narrative=(
+                                    f"Case {case_id} is already escalated to {target_department} "
+                                    f"under ticket {existing_ticket}. Duplicate escalation suppressed."
+                                ),
+                            )
+
+                    # Assign tracking ticket ID
+                    self._exception_counter += 1
+                    ticket_id = f"TKT-{self._exception_counter:04d}"
+                    timestamp = datetime.now(UTC).isoformat()
+
                     wf = await wf_repo.get(case_id)
                     if wf is None:
                         wf = await wf_repo.create_workflow_instance(
@@ -807,26 +834,26 @@ class ExceptionService:
         timestamp = datetime.now(UTC).isoformat()
         try:
             async for session in get_db_session():
-                exc_repo = ExceptionRepository(session)
-                wf_repo = WorkflowRepository(session)
-                audit_repo = AuditRepository(session)
-
-                record = await exc_repo.get(exception_id)
-                if record is None:
-                    raise ExceptionServiceError(
-                        f"Exception '{exception_id}' not found."
-                    )
-
-                if record.is_resolved:
-                    return {
-                        "exception_id": exception_id,
-                        "status": "already_resolved",
-                        "resolved_at": record.resolved_at.isoformat()
-                        if record.resolved_at
-                        else None,
-                    }
-
                 async with session.begin():
+                    exc_repo = ExceptionRepository(session)
+                    wf_repo = WorkflowRepository(session)
+                    audit_repo = AuditRepository(session)
+
+                    record = await exc_repo.get(exception_id)
+                    if record is None:
+                        raise ExceptionServiceError(
+                            f"Exception '{exception_id}' not found."
+                        )
+
+                    if record.is_resolved:
+                        return {
+                            "exception_id": exception_id,
+                            "status": "already_resolved",
+                            "resolved_at": record.resolved_at.isoformat()
+                            if record.resolved_at
+                            else None,
+                        }
+
                     await exc_repo.mark_resolved(record.id)
                     wf_exceptions = await exc_repo.get_by_workflow_id(
                         record.workflow_id

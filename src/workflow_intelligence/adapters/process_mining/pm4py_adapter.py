@@ -7,6 +7,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from workflow_intelligence.observability.tracing import (
+    SPAN_PM4PY_DISCOVER_DFG,
+    trace_span,
+)
+
 try:
     import pm4py
     from pm4py.algo.discovery.dfg import algorithm as dfg_algorithm
@@ -159,6 +164,7 @@ class PM4PyAdapter:
         )
         return formatted
 
+    @trace_span(SPAN_PM4PY_DISCOVER_DFG)
     def discover_dfg(self, df: pd.DataFrame) -> dict[tuple[str, str], int]:
         """Discover the Directly-Follows Graph from an event log.
 

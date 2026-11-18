@@ -10,6 +10,10 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from workflow_intelligence.observability.tracing import (
+    SPAN_MCP_TOOL_INVOKE,
+    trace_span,
+)
 from workflow_intelligence.schemas.exception import (
     EscalationRequest,
     ResolutionRequest,
@@ -27,6 +31,7 @@ def register_exception_tools(mcp: FastMCP, service: ExceptionService) -> None:
     """
 
     @mcp.tool()
+    @trace_span(SPAN_MCP_TOOL_INVOKE)
     async def exception_investigate_workflow(
         case_id: str,
         workflow_type: str,
@@ -55,6 +60,7 @@ def register_exception_tools(mcp: FastMCP, service: ExceptionService) -> None:
         return result.model_dump()
 
     @mcp.tool()
+    @trace_span(SPAN_MCP_TOOL_INVOKE)
     async def exception_recommend_resolution(
         exception_id: str,
         policy_context: dict[str, Any] | None = None,
@@ -79,6 +85,7 @@ def register_exception_tools(mcp: FastMCP, service: ExceptionService) -> None:
         return result.model_dump()
 
     @mcp.tool()
+    @trace_span(SPAN_MCP_TOOL_INVOKE)
     async def exception_escalate_case(
         case_id: str,
         reason: str,

@@ -857,6 +857,8 @@ class TestDimensionalAttribution:
 
         # Gross absolute-change share percentage
         total_abs = abs(expedited.delta) + abs(standard.delta)
+        assert expedited.gross_share_percentage is not None
+        assert standard.gross_share_percentage is not None
         assert abs(expedited.gross_share_percentage - (55868.25 / total_abs * 100)) < 1e-2
         assert abs(standard.gross_share_percentage - (120.20 / total_abs * 100)) < 1e-2
 
@@ -914,4 +916,43 @@ class TestDimensionalAttribution:
         assert "reduction of 120.20" in summary or "-120.20" in summary
         assert "100.22% net contribution" in summary
         assert "-0.22% net contribution" in summary
+
+
+class TestSQLIdentifierInjectionSafety:
+    """Regression test suite ensuring SQL identifier injection attempts are blocked."""
+
+    def test_invalid_dimension_identifier_rejected(self) -> None:
+        with pytest.raises(Exception):
+            KPIExplanationRequest(
+                metric_name="processing_cost",
+                source_uri="sample-data/procurement_costs.csv",
+                timeframe_current="Q3",
+                timeframe_baseline="Q2",
+                observed_delta=100.0,
+                dimension="department; DROP TABLE users; --",
+            )
+
+    def test_invalid_timeframe_column_identifier_rejected(self) -> None:
+        with pytest.raises(Exception):
+            KPICalculationRequest(
+                metric_name="processing_cost",
+                source_uri="sample-data/procurement_costs.csv",
+                timeframe_column="quarter; SELECT * FROM secret; --",
+                timeframe_current="Q3",
+                timeframe_baseline="Q2",
+            )
+
+    def test_nonexistent_column_rejected_by_analytics_service(self) -> None:
+        analytics = AnalyticsService()
+        with pytest.raises(AnalyticsServiceError) as exc_info:
+            analytics.rank_dimensions(
+                table_name="procurement_costs",
+                metric_name="processing_cost",
+                dimension_col="nonexistent_column",
+                current_timeframe="Q3",
+                baseline_timeframe="Q2",
+                timeframe_column="quarter",
+            )
+        assert "not found in 'procurement_costs'" in str(exc_info.value)
+
 

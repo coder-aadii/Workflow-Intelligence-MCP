@@ -215,6 +215,16 @@ class TestServerProtocolExecution:
 
     def test_decision_explain_kpi_deviation(self) -> None:
         service = DecisionService()
+        perf = service.analyze_kpi_performance(
+            KPICalculationRequest(
+                metric_name="processing_cost",
+                source_uri=str(COSTS_CSV),
+                timeframe_column="quarter",
+                timeframe_current="Q3",
+                timeframe_baseline="Q2",
+            )
+        )
+        observed_delta = perf.current_value - perf.baseline_value
         explanation = service.explain_kpi_deviation(
             KPIExplanationRequest(
                 metric_name="processing_cost",
@@ -222,13 +232,13 @@ class TestServerProtocolExecution:
                 timeframe_column="quarter",
                 timeframe_current="Q3",
                 timeframe_baseline="Q2",
-                observed_delta=925.0,
+                observed_delta=observed_delta,
                 dimension="department",
             )
         )
         assert explanation.success is True
         assert explanation.metric_name == "processing_cost"
-        assert explanation.observed_delta == 925.0
+        assert explanation.observed_delta == observed_delta
         assert len(explanation.top_contributors) >= 1
         assert explanation.explanation
 

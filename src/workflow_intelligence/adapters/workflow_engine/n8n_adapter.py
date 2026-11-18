@@ -139,6 +139,24 @@ class N8NAdapter(BaseWorkflowEngineAdapter):
         """n8n does not expose workflow history; returns empty list."""
         return []
 
+    async def send_update_signal(
+        self, workflow_id: str, signal_name: str, payload: dict[str, Any]
+    ) -> bool:
+        """Send an update signal to an n8n workflow via webhook trigger.
+
+        Since n8n lacks native in-flight workflow signals, signals are
+        dispatched as webhook events carrying signal metadata.
+        """
+        signal_payload = {
+            "workflow_id": workflow_id,
+            "signal_name": signal_name,
+            "payload": payload,
+            "sent_at": time.time(),
+        }
+        return await self.dispatch_webhook(
+            webhook_id=f"{workflow_id}-{signal_name}", payload=signal_payload
+        )
+
     async def query_workflow_state(self, workflow_id: str) -> dict[str, Any]:
         """n8n does not expose workflow state; returns unknown state."""
         return {"workflow_id": workflow_id, "status": "unknown", "engine": "n8n"}

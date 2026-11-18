@@ -336,7 +336,7 @@ r = svc.explain_kpi_deviation(KPIExplanationRequest(
     timeframe_column='quarter',
     timeframe_current='Q3',
     timeframe_baseline='Q2',
-    observed_delta=925.0,
+    observed_delta=969.77,
     dimension='department',
 ))
 print(r.explanation)

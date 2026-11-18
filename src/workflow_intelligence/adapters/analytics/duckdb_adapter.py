@@ -20,6 +20,7 @@ from typing import Any
 
 import duckdb
 
+from workflow_intelligence.observability.tracing import SPAN_DUCKDB_QUERY, trace_span
 from workflow_intelligence.security.file_validator import (
     SecurityError,
     validate_safe_path,
@@ -128,6 +129,7 @@ class DuckDBAdapter:
             if timer is not None:
                 timer.cancel()
 
+    @trace_span(SPAN_DUCKDB_QUERY)
     def execute_query(
         self,
         sql: str,
@@ -163,6 +165,7 @@ class DuckDBAdapter:
         except Exception as exc:  # noqa: BLE001 - wrap adapter errors
             raise DuckDBAdapterError("DuckDB query failed: " + str(exc)) from exc
 
+    @trace_span(SPAN_DUCKDB_QUERY)
     def execute_query_df(
         self,
         sql: str,
@@ -270,9 +273,9 @@ class DuckDBAdapter:
     @staticmethod
     def file_hash(path: str | Path) -> str:
         """Return the SHA-256 hex digest of a file for provenance tracking."""
-        resolved = Path(path).expanduser().resolve()
-        if not resolved.is_file():
-            raise DuckDBAdapterError(f"File not found for hashing: {resolved}")
+        from workflow_intelligence.security.file_validator import validate_safe_path
+
+        resolved = validate_safe_path(str(path))
         digest = hashlib.sha256()
         with resolved.open("rb") as handle:
             for chunk in iter(lambda: handle.read(65536), b""):
@@ -282,4 +285,6 @@ class DuckDBAdapter:
     @staticmethod
     def file_size(path: str | Path) -> int:
         """Return the size of a file in bytes."""
-        return Path(path).expanduser().resolve().stat().st_size
+        from workflow_intelligence.security.file_validator import validate_safe_path
+
+        return validate_safe_path(str(path)).stat().st_size

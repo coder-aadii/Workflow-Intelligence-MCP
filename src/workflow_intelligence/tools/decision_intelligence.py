@@ -14,6 +14,10 @@ from typing import Any
 
 from fastmcp import FastMCP
 
+from workflow_intelligence.observability.tracing import (
+    SPAN_MCP_TOOL_INVOKE,
+    trace_span,
+)
 from workflow_intelligence.schemas.decision import (
     DecisionBriefRequest,
     KPICalculationRequest,
@@ -31,6 +35,7 @@ def register_decision_tools(mcp: FastMCP, service: DecisionService) -> None:
     """
 
     @mcp.tool()
+    @trace_span(SPAN_MCP_TOOL_INVOKE)
     async def decision_analyze_kpi_performance(
         metric_name: str,
         source_uri: str,
@@ -70,6 +75,7 @@ def register_decision_tools(mcp: FastMCP, service: DecisionService) -> None:
         return result.model_dump()
 
     @mcp.tool()
+    @trace_span(SPAN_MCP_TOOL_INVOKE)
     async def decision_explain_kpi_deviation(
         metric_name: str,
         source_uri: str,
@@ -114,6 +120,7 @@ def register_decision_tools(mcp: FastMCP, service: DecisionService) -> None:
         return result.model_dump()
 
     @mcp.tool()
+    @trace_span(SPAN_MCP_TOOL_INVOKE)
     async def decision_generate_brief(
         topic: str,
         metric_ids: list[str],

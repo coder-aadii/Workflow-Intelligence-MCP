@@ -133,13 +133,12 @@ def create_server() -> FastMCP:
 
     auth_verifier = None
     if settings.mcp_auth_token:
+        if settings.workflow_env == "production":
+            validate_production_auth_token(settings.mcp_auth_token)
         auth_verifier = StaticTokenVerifier(settings.mcp_auth_token)
-        logger.info("Configured bearer token authentication for network MCP endpoints.")
-    elif settings.workflow_env == "production":
-        logger.warning(
-            "Production environment running without MCP_AUTH_TOKEN configured. "
-            "Network endpoints will not enforce authentication unless MCP_AUTH_TOKEN is set."
-        )
+        logger.info("Configured bearer token authentication for MCP endpoints.")
+    elif settings.workflow_env == "production" and settings.server_transport != "stdio":
+        validate_production_auth_token(settings.mcp_auth_token)
 
     mcp = FastMCP(
         name="workflow-intelligence",
@@ -154,17 +153,16 @@ def create_server() -> FastMCP:
         auth=auth_verifier,
     )
 
-    process_service = ProcessService()
-    exception_service = ExceptionService()
-    analytics = AnalyticsService()
-    decision_service = DecisionService(analytics=analytics)
+    from workflow_intelligence.dependencies import get_service_container
 
-    register_process_tools(mcp, process_service)
-    register_exception_tools(mcp, exception_service)
-    register_decision_tools(mcp, decision_service)
+    container = get_service_container()
+
+    register_process_tools(mcp, container.process_service)
+    register_exception_tools(mcp, container.exception_service)
+    register_decision_tools(mcp, container.decision_service)
 
     register_resources(
-        mcp, process_service, DEFAULT_SOURCE_URI, data_dir=DEFAULT_DATA_DIR
+        mcp, container.process_service, DEFAULT_SOURCE_URI, data_dir=DEFAULT_DATA_DIR
     )
     register_prompts(mcp)
 

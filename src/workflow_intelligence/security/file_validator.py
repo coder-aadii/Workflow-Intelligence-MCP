@@ -148,6 +148,19 @@ def validate_safe_path(
     if not resolved.is_file():
         raise SecurityError(f"Path is not a regular file: '{resolved}'.")
 
+    # 3b. Re-verify sensitive filenames and hidden components on canonical target
+    resolved_filename = resolved.name.lower()
+    if resolved_filename in BLOCKED_FILENAMES or resolved_filename.startswith("."):
+        raise SecurityError(
+            f"Access to sensitive or hidden file '{resolved_filename}' via resolved target is denied."
+        )
+
+    for part in resolved.parts:
+        if part.startswith(".") and part != ".":
+            raise SecurityError(
+                f"Access denied: Resolved path component '{part}' is a hidden directory."
+            )
+
     # 4. Check extension
     extensions = supported_extensions or SUPPORTED_FILE_EXTENSIONS
     suffix = resolved.suffix.lower()

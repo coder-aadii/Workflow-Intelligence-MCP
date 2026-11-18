@@ -271,11 +271,39 @@ def list_supported_files(directory: str | Path) -> list[str]:
     Returns:
         Sorted list of file paths as strings.
     """
-    dir_path = Path(directory)
-    if not dir_path.exists():
+    from workflow_intelligence.security.file_validator import (
+        BLOCKED_FILENAMES,
+        get_default_allowed_directories,
+    )
+
+    raw_path = Path(directory)
+    if ".." in raw_path.parts:
+        raise SecurityError("Directory traversal detected: contains '..'.")
+
+    resolved_dir = raw_path.expanduser().resolve()
+    if not resolved_dir.exists() or not resolved_dir.is_dir():
         return []
 
-    files = sorted(
-        str(p) for p in dir_path.iterdir() if p.suffix.lower() in SUPPORTED_EXTENSIONS
+    # Verify against allowed directories
+    allowed_dirs = get_default_allowed_directories()
+    is_allowed = any(
+        resolved_dir.is_relative_to(d.resolve()) for d in allowed_dirs
     )
+    if not is_allowed:
+        raise SecurityError(
+            f"Access denied: Directory '{resolved_dir}' is outside allowed directories."
+        )
+
+    for part in resolved_dir.parts:
+        if part.startswith(".") and part != ".":
+            raise SecurityError(f"Access denied: Hidden directory '{part}'.")
+
+    files = [
+        str(p)
+        for p in sorted(resolved_dir.iterdir())
+        if p.is_file()
+        and p.suffix.lower() in SUPPORTED_EXTENSIONS
+        and not p.name.startswith(".")
+        and p.name.lower() not in BLOCKED_FILENAMES
+    ]
     return files

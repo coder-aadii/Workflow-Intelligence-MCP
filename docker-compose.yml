@@ -97,8 +97,6 @@ volumes:
   wimcp-postgres-data:
   wimcp-redis-data:
   wimcp-data:
-  # Retained to ensure existing Docker named volumes are not marked orphaned
-  wimcp-sample-data:
 
 networks:
   wimcp-network:

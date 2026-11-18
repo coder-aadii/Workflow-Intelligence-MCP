@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .common import BaseMCPResponse
+
+IDENTIFIER_REGEX = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class KPICalculationRequest(BaseModel):
@@ -47,6 +50,13 @@ class KPICalculationRequest(BaseModel):
             "'100.0 * SUM(spoiled) / SUM(total)'."
         ),
     )
+
+    @field_validator("timeframe_column")
+    @classmethod
+    def validate_timeframe_column(cls, v: str) -> str:
+        if not IDENTIFIER_REGEX.fullmatch(v):
+            raise ValueError(f"Invalid SQL column identifier: {v!r}")
+        return v
 
 
 class KPIExplanationRequest(BaseModel):
@@ -94,6 +104,20 @@ class KPIExplanationRequest(BaseModel):
         ),
     )
 
+    @field_validator("timeframe_column")
+    @classmethod
+    def validate_timeframe_column(cls, v: str) -> str:
+        if not IDENTIFIER_REGEX.fullmatch(v):
+            raise ValueError(f"Invalid SQL column identifier: {v!r}")
+        return v
+
+    @field_validator("dimension")
+    @classmethod
+    def validate_dimension(cls, v: str | None) -> str | None:
+        if v is not None and not IDENTIFIER_REGEX.fullmatch(v):
+            raise ValueError(f"Invalid SQL dimension identifier: {v!r}")
+        return v
+
 
 class DecisionBriefRequest(BaseModel):
     """Request to generate a structured decision brief.
@@ -120,6 +144,13 @@ class DecisionBriefRequest(BaseModel):
     timeframe_baseline: str | None = Field(
         default=None, description="Optional baseline period identifier."
     )
+
+    @field_validator("timeframe_column")
+    @classmethod
+    def validate_timeframe_column(cls, v: str | None) -> str | None:
+        if v is not None and not IDENTIFIER_REGEX.fullmatch(v):
+            raise ValueError(f"Invalid SQL column identifier: {v!r}")
+        return v
 
 
 class MetricComparison(BaseModel):

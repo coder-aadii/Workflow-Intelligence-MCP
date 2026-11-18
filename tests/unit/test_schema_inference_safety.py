@@ -15,12 +15,15 @@ Covers:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import json
 from pathlib import Path
 
 import pandas as pd
 import pytest
 from pydantic import ValidationError
+
+CsvFactory = Callable[..., str]
 
 from workflow_intelligence.adapters.analytics.duckdb_adapter import DuckDBAdapter
 from workflow_intelligence.adapters.file_storage.loader import (
@@ -52,7 +55,7 @@ from workflow_intelligence.services.reporting_service import ReportingService
 
 
 @pytest.fixture
-def temp_csv(tmp_path: Path):
+def temp_csv(tmp_path: Path) -> CsvFactory:
     """Factory fixture for temporary CSV files."""
 
     def _create(df: pd.DataFrame, filename: str = "test.csv") -> str:
@@ -75,7 +78,7 @@ class TestPositionalFallbackRemoval:
         assert "Could not automatically infer" in err
         assert "Available columns: ['alpha', 'beta', 'gamma']" in err
 
-    def test_non_event_table_rejected_by_bottlenecks(self, temp_csv) -> None:
+    def test_non_event_table_rejected_by_bottlenecks(self, temp_csv: CsvFactory) -> None:
         """Analytical cost table is rejected by bottleneck tool rather than silently mined."""
         df = pd.DataFrame(
             [
@@ -120,7 +123,7 @@ class TestUnambiguousInferencePreserved:
 class TestExplicitColumnMapping:
     """Requirement 3: Bottleneck and automation tools accept explicit column overrides."""
 
-    def test_bottlenecks_with_explicit_columns(self, temp_csv) -> None:
+    def test_bottlenecks_with_explicit_columns(self, temp_csv: CsvFactory) -> None:
         """Bottleneck detection succeeds on unfamiliar column names when explicitly mapped."""
         df = pd.DataFrame(
             [
@@ -144,7 +147,7 @@ class TestExplicitColumnMapping:
         assert report.success is True
         assert report.total_stages_analyzed >= 1
 
-    def test_automation_scoring_with_explicit_columns(self, temp_csv) -> None:
+    def test_automation_scoring_with_explicit_columns(self, temp_csv: CsvFactory) -> None:
         """Automation scoring succeeds on unfamiliar column names when explicitly mapped."""
         df = pd.DataFrame(
             [
@@ -172,7 +175,7 @@ class TestExplicitColumnMapping:
 class TestRejectMissingDuplicateAmbiguousMappings:
     """Requirement 4: Reject missing, duplicate, or ambiguous mappings with actionable errors."""
 
-    def test_missing_explicit_column_raises_with_available_columns(self, temp_csv) -> None:
+    def test_missing_explicit_column_raises_with_available_columns(self, temp_csv: CsvFactory) -> None:
         df = pd.DataFrame(
             [{"case_id": "C1", "activity": "A", "timestamp": "2026-01-01T09:00:00"}]
         )
@@ -203,7 +206,7 @@ class TestRejectMissingDuplicateAmbiguousMappings:
             )
         assert "Column names must be distinct" in str(exc_info.value)
 
-    def test_duplicate_column_mapping_rejected_by_loader(self, temp_csv) -> None:
+    def test_duplicate_column_mapping_rejected_by_loader(self, temp_csv: CsvFactory) -> None:
         """Loader rejects duplicate column mappings."""
         df = pd.DataFrame(
             [{"case_id": "C1", "activity": "A", "timestamp": "2026-01-01T09:00:00"}]
@@ -330,7 +333,7 @@ class TestNullValuesValidation:
 class TestSuspiciousPatternWarnings:
     """Requirement 7: Warn for suspicious patterns without rejecting single-event cases."""
 
-    def test_warns_on_all_single_event_cases(self, temp_csv) -> None:
+    def test_warns_on_all_single_event_cases(self, temp_csv: CsvFactory) -> None:
         """Every case has 1 event (surrogate row ID symptom). Attaches warning, succeeds."""
         df = pd.DataFrame(
             [
@@ -353,7 +356,7 @@ class TestSuspiciousPatternWarnings:
         assert res.warnings is not None
         assert any("surrogate row identifier" in w for w in res.warnings)
 
-    def test_mixed_single_and_multi_event_cases_no_false_warning(self, temp_csv) -> None:
+    def test_mixed_single_and_multi_event_cases_no_false_warning(self, temp_csv: CsvFactory) -> None:
         """Legitimate process with some single-event and some multi-event cases has no surrogate warning."""
         df = pd.DataFrame(
             [
@@ -391,7 +394,7 @@ class TestUnifiedInferenceWithResources:
 class TestDecisionDimensionInference:
     """Requirement 9: Dimension inference avoids row identifiers and high-cardinality fields."""
 
-    def test_avoids_order_id_in_procurement_data(self, temp_csv) -> None:
+    def test_avoids_order_id_in_procurement_data(self, temp_csv: CsvFactory) -> None:
         """When order_id is a unique row ID, infer_dimension_column selects department."""
         adapter = DuckDBAdapter(":memory:")
         df = pd.DataFrame(
@@ -411,7 +414,7 @@ class TestDecisionDimensionInference:
 class TestDecisionBriefCrossDatasetSafety:
     """Requirement 10: Decision brief rejects mismatched timeframe column rather than guessing."""
 
-    def test_brief_rejects_missing_timeframe_column(self, temp_csv) -> None:
+    def test_brief_rejects_missing_timeframe_column(self, temp_csv: CsvFactory) -> None:
         df = pd.DataFrame(
             [
                 {"dept": "IT", "processing_cost": 100.0},

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import sys
 from collections.abc import Callable
 from typing import Any, TypeVar, cast
 
@@ -47,7 +48,8 @@ def init_tracing(
 
     Args:
         workflow_env: Application environment. Used to decide exporter
-            behavior; development exports spans to stdout.
+            behavior; development exports spans to stderr to avoid stdout
+            corruption for STDIO transports.
 
     Returns:
         The configured :class:`TracerProvider`.
@@ -58,7 +60,9 @@ def init_tracing(
 
     provider = TracerProvider()
     if workflow_env == "development":
-        provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+        provider.add_span_processor(
+            SimpleSpanProcessor(ConsoleSpanExporter(out=sys.stderr))
+        )
     trace.set_tracer_provider(provider)
     _TRACER_PROVIDER = provider
     return provider

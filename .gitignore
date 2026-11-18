@@ -69,6 +69,8 @@ dmypy.json
 .ruff_cache/
 
 # Databases and Local Analytics Files
+sample-data/bpic19_flat.csv
+sample-data/insurance_full.csv
 *.duckdb
 *.duckdb.wal
 *.sqlite3

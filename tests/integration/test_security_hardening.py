@@ -138,6 +138,22 @@ class TestFilePathSecurity:
             )
         assert "exceeds maximum configured limit" in str(exc_info.value)
 
+    def test_symlink_to_sensitive_or_hidden_target_blocked(self, tmp_path: Path) -> None:
+        """Rejects symlinks pointing to sensitive or hidden files even if symlink name appears benign."""
+        allowed_dir = tmp_path / "allowed_data"
+        allowed_dir.mkdir()
+        # Hidden target file inside allowed dir
+        hidden_target = allowed_dir / ".hidden_secret.csv"
+        hidden_target.write_text("case_id,activity,timestamp\n1,A,2026-01-01\n")
+
+        # Benign-looking symlink name
+        symlink = allowed_dir / "benign.csv"
+        symlink.symlink_to(hidden_target)
+
+        with pytest.raises(SecurityError) as exc_info:
+            validate_safe_path(str(symlink), allowed_dirs=[allowed_dir])
+        assert "sensitive or hidden file" in str(exc_info.value).lower() or "hidden" in str(exc_info.value).lower()
+
     def test_loader_integrates_security_checks(self) -> None:
         """Verifies FileStorageLoader translates SecurityError to FileStorageError."""
         with pytest.raises(FileStorageError):
@@ -207,6 +223,22 @@ class TestNetworkAuthSecurity:
             res = await client.call_tool("secure_ping", {})
             assert not res.is_error
             assert "secure_pong" in str(res.content)
+
+    def test_create_server_production_fail_closed_without_token(self) -> None:
+        """create_server() fails closed with RuntimeError in production when auth token is missing."""
+        from unittest.mock import patch
+        from workflow_intelligence.config import Settings
+        from workflow_intelligence.server import create_server
+
+        prod_settings = Settings(
+            workflow_env="production",
+            server_transport="streamable-http",
+            mcp_auth_token=None,
+        )
+        with patch("workflow_intelligence.server.get_settings", return_value=prod_settings):
+            with pytest.raises(RuntimeError) as exc_info:
+                create_server()
+            assert "MCP_AUTH_TOKEN is required" in str(exc_info.value)
 
 
 class TestProductionDatabaseFailureSecurity:

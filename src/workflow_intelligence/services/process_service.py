@@ -609,6 +609,7 @@ class ProcessService:
                         avg_duration_hours=t.mean_duration_hours,
                         baseline_duration_hours=baseline_mean,
                         z_score=z_score,
+                        affected_transition_count=t.transition_count,
                         affected_case_count=t.transition_count,
                         primary_contributor=("Excessive waiting time at stage"),
                         recommendation=(
